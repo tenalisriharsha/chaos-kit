@@ -1,0 +1,27 @@
+name: api-pod-kill-resilience
+description: Kill one API pod and verify the service stays healthy.
+
+steady_state:
+  - name: low-error-rate
+    query: rate(http_requests_total{status=~"5.."}[5m])
+    operator: lt
+    threshold: 0.01
+  - name: p99-latency-bounded
+    query: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+    operator: lte
+    threshold: 0.5
+
+actions:
+  - type: pod_kill
+    target:
+      namespace: default
+      label_selector: app=api
+    params:
+      count: 1
+  - type: network_latency
+    target:
+      namespace: default
+      label_selector: app=api
+    params:
+      latency_ms: 100
+      duration: 30s
