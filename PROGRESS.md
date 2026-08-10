@@ -43,8 +43,9 @@ YAML experiment file
 
 - `chaoskit.experiment` — parse/validate experiment YAML into typed models.
 - `chaoskit.steadystate` — Prometheus instant queries, probe evaluation.
-- `chaoskit.injectors` — Kubernetes chaos actions (Phase 2).
-- `chaoskit.runner` — experiment orchestration (Phase 2).
+- `chaoskit.injectors` — Kubernetes chaos actions behind a mockable
+  `KubernetesClient` protocol (pod_kill, cpu_stress, network_latency).
+- `chaoskit.runner` — experiment orchestration: check -> inject -> settle -> re-check.
 - `chaoskit.report` — resilience report generation (Phase 3).
 - `chaoskit.cli` — `validate`, `check`, `run` subcommands.
 
@@ -57,26 +58,26 @@ YAML experiment file
 - [x] CLI: `validate` and `check` subcommands
 - [x] Tests for all of the above (35 passing)
 
-### Phase 2 — Injection & orchestration (next)
-- [ ] `injectors/` package: Kubernetes client abstraction (mockable)
-- [ ] `pod_kill` injector (delete pods matching label_selector)
-- [ ] `cpu_stress` and `network_latency` injectors
-- [ ] `runner.py`: check steady state -> inject -> settle window -> re-check
-- [ ] CLI `run` subcommand wiring it together
-- [ ] Tests with a fake Kubernetes client
+### Phase 2 — Injection & orchestration ✅ (done, night 2)
+- [x] `injectors/` package: Kubernetes client abstraction (mockable)
+- [x] `pod_kill` injector (delete pods matching label_selector)
+- [x] `cpu_stress` and `network_latency` injectors
+- [x] `runner.py`: check steady state -> inject -> settle window -> re-check
+- [x] CLI `run` subcommand wiring it together
+- [x] Tests with a fake Kubernetes client (60 passing total)
 
-### Phase 3 — Reporting & polish
+### Phase 3 — Reporting & polish (next)
 - [ ] `report.py`: pass/fail resilience report (text + `--json` output)
 - [ ] Duration/recovery-time metrics in the report
 - [ ] Example experiments gallery, README screenshots/output samples
 
-## Resume here (night 2)
+## Resume here (night 3)
 
-Phase 1 is complete and green (`.venv/bin/python -m pytest` -> 35 passed).
-Tomorrow: start Phase 2 at the injectors — create `src/chaoskit/injectors/`
-with a `KubernetesClient` protocol and the `pod_kill` injector first
-(delete pods matching `target.namespace` + `target.label_selector`, honoring
-`params.count`), then `runner.py` (steady-state check -> inject -> settle ->
-re-check) and the `run` CLI subcommand. Add tests with a fake k8s client;
-keep the real kubernetes dependency optional/lazy so tests don't need a
-cluster.
+Phase 2 is complete and green (`.venv/bin/python -m pytest` -> 60 passed).
+Tomorrow: start Phase 3 with `src/chaoskit/report.py` — take the runner's
+`RunResult` (in `src/chaoskit/runner.py`) and render a pass/fail resilience
+report as text, plus machine-readable JSON behind a `--json` flag on
+`chaoskit run` (see `cmd_run` in `src/chaoskit/cli.py`). Add wall-clock
+timestamps around injection in the runner so the report can show duration
+and recovery time. Then add an examples gallery under `examples/` and
+sample report output in the README. Finish with DAILY_REPORT.md.
