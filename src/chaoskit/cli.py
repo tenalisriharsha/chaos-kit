@@ -6,6 +6,9 @@ import argparse
 import sys
 
 from chaoskit.experiment import ExperimentError, load_experiment
+from chaoskit.injectors import InjectionError
+from chaoskit.injectors.kubernetes import KubernetesError
+from chaoskit.runner import run_experiment
 from chaoskit.steadystate import (
     PrometheusClient,
     SteadyStateError,
@@ -36,6 +39,23 @@ def build_parser() -> argparse.ArgumentParser:
         default="http://localhost:9090",
         help="Prometheus base URL (default: http://localhost:9090).",
     )
+
+    p_run = sub.add_parser(
+        "run",
+        help="Run an experiment: steady-state check, inject chaos, re-check.",
+    )
+    p_run.add_argument("file", help="Path to the experiment YAML file.")
+    p_run.add_argument(
+        "--prometheus",
+        default="http://localhost:9090",
+        help="Prometheus base URL (default: http://localhost:9090).",
+    )
+    p_run.add_argument(
+        "--settle",
+        type=float,
+        default=10.0,
+        help="Seconds to wait after injection before re-checking (default: 10).",
+    )
     return parser
 
 
@@ -59,6 +79,23 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_probe_results(results: list) -> None:
+    for result in results:
+        status = "PASS" if result.passed else "FAIL"
+        probe = result.probe
+        print(
+            f"{status} {probe.name}: value={result.value} "
+            f"(expected {probe.operator} {probe.threshold})"
+        )
+
+
+def _build_kubernetes_client():
+    """Construct the real Kubernetes client (lazy, monkeypatchable)."""
+    from chaoskit.injectors.kubernetes import CoreV1KubernetesClient
+
+    return CoreV1KubernetesClient()
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     try:
         exp = load_experiment(args.file)
@@ -73,13 +110,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    for result in results:
-        status = "PASS" if result.passed else "FAIL"
-        probe = result.probe
-        print(
-            f"{status} {probe.name}: value={result.value} "
-            f"(expected {probe.operator} {probe.threshold})"
-        )
+    _print_probe_results(results)
     if all_passed(results):
         print("Steady state: OK")
         return 0
@@ -87,9 +118,49 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    try:
+        exp = load_experiment(args.file)
+    except ExperimentError as exc:
+        print(f"INVALID: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        kubernetes = _build_kubernetes_client()
+    except KubernetesError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    metrics = PrometheusClient(args.prometheus)
+    try:
+        result = run_experiment(exp, metrics, kubernetes, settle_seconds=args.settle)
+    except (SteadyStateError, InjectionError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Experiment: {exp.name}")
+    print("Pre-injection steady state:")
+    _print_probe_results(result.pre_check)
+    if result.aborted:
+        print("Steady state violated before injection; experiment ABORTED")
+        return 1
+
+    print("Injected chaos:")
+    for record in result.injections:
+        print(f"  - {record.action_type} -> {record.target}: {record.description}")
+
+    print("Post-injection steady state:")
+    _print_probe_results(result.post_check or [])
+    if result.passed:
+        print("Steady state: OK — experiment PASSED")
+        return 0
+    print("Steady state: VIOLATED — experiment FAILED")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    handlers = {"validate": cmd_validate, "check": cmd_check}
+    handlers = {"validate": cmd_validate, "check": cmd_check, "run": cmd_run}
     return handlers[args.command](args)
 
 
