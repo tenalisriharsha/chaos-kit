@@ -1,6 +1,6 @@
 # chaos-kit — Progress Log
 
-STATUS: IN_PROGRESS
+STATUS: COMPLETE
 
 ## Vision
 
@@ -45,9 +45,10 @@ YAML experiment file
 - `chaoskit.steadystate` — Prometheus instant queries, probe evaluation.
 - `chaoskit.injectors` — Kubernetes chaos actions behind a mockable
   `KubernetesClient` protocol (pod_kill, cpu_stress, network_latency).
-- `chaoskit.runner` — experiment orchestration: check -> inject -> settle -> re-check.
-- `chaoskit.report` — resilience report generation (Phase 3).
-- `chaoskit.cli` — `validate`, `check`, `run` subcommands.
+- `chaoskit.runner` — experiment orchestration: check -> inject -> settle ->
+  re-check, with wall-clock timing (duration, recovery time).
+- `chaoskit.report` — resilience report rendering (text + JSON).
+- `chaoskit.cli` — `validate`, `check`, `run` subcommands (`run --json`).
 
 ## Build plan
 
@@ -66,18 +67,23 @@ YAML experiment file
 - [x] CLI `run` subcommand wiring it together
 - [x] Tests with a fake Kubernetes client (60 passing total)
 
-### Phase 3 — Reporting & polish (next)
-- [ ] `report.py`: pass/fail resilience report (text + `--json` output)
-- [ ] Duration/recovery-time metrics in the report
-- [ ] Example experiments gallery, README screenshots/output samples
+### Phase 3 — Reporting & polish ✅ (done, night 3)
+- [x] Wall-clock timestamps in the runner (`started_at`, per-injection `at`,
+  `injection_finished_at`, `finished_at`; injectable `clock` for tests)
+- [x] `report.py`: pass/fail resilience report as text and JSON
+  (`render_text`, `render_json`, `report_dict`)
+- [x] Duration/recovery-time metrics in the report
+- [x] `chaoskit run --json` for machine-readable output
+- [x] Examples gallery (`cpu-stress.yaml`, `network-latency.yaml`) and
+  sample report output in the README
+- [x] Tests for all of the above (70 passing total)
 
-## Resume here (night 3)
+## Project complete
 
-Phase 2 is complete and green (`.venv/bin/python -m pytest` -> 60 passed).
-Tomorrow: start Phase 3 with `src/chaoskit/report.py` — take the runner's
-`RunResult` (in `src/chaoskit/runner.py`) and render a pass/fail resilience
-report as text, plus machine-readable JSON behind a `--json` flag on
-`chaoskit run` (see `cmd_run` in `src/chaoskit/cli.py`). Add wall-clock
-timestamps around injection in the runner so the report can show duration
-and recovery time. Then add an examples gallery under `examples/` and
-sample report output in the README. Finish with DAILY_REPORT.md.
+All three phases are done, the full suite passes
+(`.venv/bin/python -m pytest` -> 70 passed), the README is final, and
+[DAILY_REPORT.md](DAILY_REPORT.md) summarizes the whole build.
+
+Possible future ideas (not planned): experiment scheduling/rollbacks,
+a `diff` command comparing reports across runs, custom probe operators,
+Grafana/Slack report export.
