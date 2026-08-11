@@ -13,11 +13,11 @@ report.
 See [PROGRESS.md](PROGRESS.md) for the vision, architecture, phased build
 plan, and exactly where the build currently stands.
 
-Current state: **Phase 2 complete** — experiment schema, steady-state
+Current state: **Phase 3 complete** — experiment schema, steady-state
 verification against Prometheus, Kubernetes chaos injectors (`pod_kill`,
-`cpu_stress`, `network_latency`), an experiment runner, and a CLI
-(`validate`, `check`, `run`), fully tested. Resilience reports land in
-Phase 3.
+`cpu_stress`, `network_latency`), an experiment runner, pass/fail
+resilience reports (text and JSON), and a CLI (`validate`, `check`,
+`run`), fully tested.
 
 ## Experiment format
 
@@ -40,7 +40,16 @@ actions:
       count: 1
 ```
 
-See [examples/experiment.yaml](examples/experiment.yaml) for a full example.
+See [examples/experiment.yaml](examples/experiment.yaml) for a full
+example. More ready-to-adapt experiments live in the
+[examples gallery](examples/):
+
+- [examples/experiment.yaml](examples/experiment.yaml) — pod kill plus
+  network latency against an API service
+- [examples/cpu-stress.yaml](examples/cpu-stress.yaml) — CPU saturation
+  on cache pods
+- [examples/network-latency.yaml](examples/network-latency.yaml) —
+  egress latency on a payments service
 
 ## Usage
 
@@ -53,7 +62,44 @@ chaoskit check examples/experiment.yaml --prometheus http://localhost:9090
 
 # Run the full experiment: steady-state check, inject chaos, settle, re-check
 chaoskit run examples/experiment.yaml --prometheus http://localhost:9090
+
+# Same, but emit the resilience report as JSON
+chaoskit run examples/experiment.yaml --prometheus http://localhost:9090 --json
 ```
+
+## Resilience reports
+
+`chaoskit run` ends with a pass/fail resilience report covering the
+verdict, pre/post steady-state probes, every injected action, and
+wall-clock timing (total duration and recovery time):
+
+```
+chaos-kit resilience report
+===========================
+Experiment: api-pod-kill-resilience
+  Kill one API pod and verify the service stays healthy.
+Started:  2026-08-11T08:07:18Z
+Duration: 10.42s (recovery: 10.02s)
+
+Pre-injection steady state:
+  PASS low-error-rate: value=0.001 (expected lt 0.01)
+  PASS p99-latency-bounded: value=0.12 (expected lte 0.5)
+
+Injected chaos:
+  - pod_kill -> default/app=api: deleted 1 pod(s): api-6d9f8c7b5-x2abc (at 2026-08-11T08:07:18Z)
+  - network_latency -> default/app=api: added 100ms latency for 30s in 1 pod(s): api-6d9f8c7b5-y7def (at 2026-08-11T08:07:19Z)
+
+Post-injection steady state:
+  PASS low-error-rate: value=0.002 (expected lt 0.01)
+  PASS p99-latency-bounded: value=0.15 (expected lte 0.5)
+
+Verdict: experiment PASSED
+```
+
+With `--json` the same report is emitted as machine-readable JSON
+(verdict, probe values, injections, and timings) for CI pipelines and
+dashboards. Exit codes: `0` passed, `1` failed or aborted, `2`
+setup/validation error.
 
 ## Chaos actions
 

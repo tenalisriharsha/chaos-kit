@@ -1,0 +1,23 @@
+name: cache-cpu-stress-resilience
+description: >-
+  Saturate one CPU core in the cache pods and verify request latency
+  stays within bounds.
+
+steady_state:
+  - name: p99-latency-bounded
+    query: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{app="cache"}[5m]))
+    operator: lte
+    threshold: 0.25
+  - name: no-timeouts
+    query: rate(http_requests_total{app="cache",status="504"}[5m])
+    operator: eq
+    threshold: 0
+
+actions:
+  - type: cpu_stress
+    target:
+      namespace: default
+      label_selector: app=cache
+    params:
+      cores: 1
+      duration: 60s

@@ -1,0 +1,19 @@
+name: payments-network-latency-resilience
+description: >-
+  Add 250ms of egress latency to the payments service and verify
+  downstream callers keep their error rate near zero.
+
+steady_state:
+  - name: low-error-rate
+    query: rate(http_requests_total{app="checkout",status=~"5.."}[5m])
+    operator: lt
+    threshold: 0.01
+
+actions:
+  - type: network_latency
+    target:
+      namespace: payments
+      label_selector: app=payments
+    params:
+      latency_ms: 250
+      duration: 45s
