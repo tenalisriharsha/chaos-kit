@@ -25,6 +25,7 @@ class InjectionRecord:
     action_type: str
     target: str
     description: str
+    at: float  # epoch timestamp of the injection
 
 
 @dataclass
@@ -33,9 +34,12 @@ class RunResult:
 
     experiment: Experiment
     pre_check: list[ProbeResult]
+    started_at: float = 0.0  # epoch timestamp
     injections: list[InjectionRecord] = field(default_factory=list)
     post_check: list[ProbeResult] | None = None
     aborted: bool = False
+    injection_finished_at: float | None = None
+    finished_at: float | None = None
 
     @property
     def passed(self) -> bool:
@@ -46,6 +50,20 @@ class RunResult:
             and all(r.passed for r in self.post_check)
         )
 
+    @property
+    def duration_seconds(self) -> float | None:
+        """Wall-clock duration of the whole run, when it has finished."""
+        if self.finished_at is None:
+            return None
+        return self.finished_at - self.started_at
+
+    @property
+    def recovery_seconds(self) -> float | None:
+        """Seconds from end of injection to end of the post-check."""
+        if self.finished_at is None or self.injection_finished_at is None:
+            return None
+        return self.finished_at - self.injection_finished_at
+
 
 def run_experiment(
     experiment: Experiment,
@@ -53,17 +71,20 @@ def run_experiment(
     kubernetes: KubernetesClient,
     settle_seconds: float = 10.0,
     sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.time,
 ) -> RunResult:
     """Run an experiment end to end and return its result.
 
-    ``sleep`` is injectable so tests can skip the settle window.
+    ``sleep`` is injectable so tests can skip the settle window; ``clock`` is
+    injectable so tests can control the timestamps on the result.
     Raises ``InjectionError`` if an action cannot be injected.
     """
     pre_check = verify_steady_state(experiment.steady_state, metrics)
-    result = RunResult(experiment=experiment, pre_check=pre_check)
+    result = RunResult(experiment=experiment, pre_check=pre_check, started_at=clock())
 
     if not all(r.passed for r in pre_check):
         result.aborted = True
+        result.finished_at = clock()
         return result
 
     for action in experiment.actions:
@@ -73,9 +94,12 @@ def run_experiment(
                 action_type=action.type,
                 target=f"{action.target['namespace']}/{action.target['label_selector']}",
                 description=description,
+                at=clock(),
             )
         )
 
+    result.injection_finished_at = clock()
     sleep(settle_seconds)
     result.post_check = verify_steady_state(experiment.steady_state, metrics)
+    result.finished_at = clock()
     return result

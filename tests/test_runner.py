@@ -123,3 +123,31 @@ def test_injection_error_propagates():
         run_experiment(
             _experiment(), metrics, FakeKubernetesClient(), sleep=lambda s: None
         )
+
+
+def test_records_wall_clock_timestamps(k8s):
+    metrics = FakeMetricsClient([0.1, 0.2])
+    ticks = iter([100.0, 110.0, 115.0, 130.0])  # start, inject, injected, done
+    result = run_experiment(
+        _experiment(), metrics, k8s, sleep=lambda s: None, clock=lambda: next(ticks)
+    )
+
+    assert result.started_at == 100.0
+    assert result.injections[0].at == 110.0
+    assert result.injection_finished_at == 115.0
+    assert result.finished_at == 130.0
+    assert result.duration_seconds == 30.0
+    assert result.recovery_seconds == 15.0
+
+
+def test_aborted_run_has_no_recovery_time(k8s):
+    metrics = FakeMetricsClient([0.9])
+    ticks = iter([50.0, 51.0])
+    result = run_experiment(
+        _experiment(), metrics, k8s, sleep=lambda s: None, clock=lambda: next(ticks)
+    )
+
+    assert result.aborted
+    assert result.duration_seconds == 1.0
+    assert result.injection_finished_at is None
+    assert result.recovery_seconds is None
