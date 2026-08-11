@@ -8,6 +8,7 @@ import sys
 from chaoskit.experiment import ExperimentError, load_experiment
 from chaoskit.injectors import InjectionError
 from chaoskit.injectors.kubernetes import KubernetesError
+from chaoskit import report
 from chaoskit.runner import run_experiment
 from chaoskit.steadystate import (
     PrometheusClient,
@@ -55,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=10.0,
         help="Seconds to wait after injection before re-checking (default: 10).",
+    )
+    p_run.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the resilience report as JSON instead of text.",
     )
     return parser
 
@@ -138,23 +144,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Experiment: {exp.name}")
-    print("Pre-injection steady state:")
-    _print_probe_results(result.pre_check)
-    if result.aborted:
-        print("Steady state violated before injection; experiment ABORTED")
-        return 1
+    if args.json:
+        print(report.render_json(result))
+    else:
+        print(report.render_text(result))
 
-    print("Injected chaos:")
-    for record in result.injections:
-        print(f"  - {record.action_type} -> {record.target}: {record.description}")
-
-    print("Post-injection steady state:")
-    _print_probe_results(result.post_check or [])
     if result.passed:
-        print("Steady state: OK — experiment PASSED")
         return 0
-    print("Steady state: VIOLATED — experiment FAILED")
     return 1
 
 

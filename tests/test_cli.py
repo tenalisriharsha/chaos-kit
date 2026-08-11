@@ -125,6 +125,54 @@ def test_run_fails_when_system_does_not_recover(
     assert fake_k8s.deleted == [("default", "api-1")]
 
 
+def test_run_json_report(experiment_file, prometheus, fake_k8s, capsys):
+    import json
+
+    prometheus.respond_value(0.001)  # pre-check
+    prometheus.respond_value(0.002)  # post-check
+    rc = main(
+        [
+            "run",
+            str(experiment_file),
+            "--prometheus",
+            prometheus.url,
+            "--settle",
+            "0",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["experiment"]["name"] == "cli-demo"
+    assert data["verdict"] == "passed"
+    assert data["steady_state"]["pre"][0]["passed"] is True
+    assert data["steady_state"]["post"][0]["passed"] is True
+    assert data["injections"][0]["type"] == "pod_kill"
+    assert data["duration_seconds"] >= 0
+
+
+def test_run_json_report_aborted(experiment_file, prometheus, fake_k8s, capsys):
+    import json
+
+    prometheus.respond_value(0.5)  # pre-check fails
+    rc = main(
+        [
+            "run",
+            str(experiment_file),
+            "--prometheus",
+            prometheus.url,
+            "--settle",
+            "0",
+            "--json",
+        ]
+    )
+    assert rc == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["verdict"] == "aborted"
+    assert data["steady_state"]["post"] is None
+    assert fake_k8s.deleted == []
+
+
 def test_run_without_kubernetes_package(experiment_file, monkeypatch, capsys):
     import chaoskit.cli
     from chaoskit.injectors.kubernetes import KubernetesError
