@@ -7,6 +7,24 @@ latency — and chaos-kit injects them, verifies your steady-state hypothesis
 against Prometheus before and after, and produces a pass/fail resilience
 report.
 
+## Preview
+
+Real CLI output (a stubbed Prometheus backend standing in for a live one,
+same pattern the test suite uses):
+
+![chaoskit validate: experiment summary, exits 0](docs/screenshots/01-validate.png)
+
+<details>
+<summary>More views</summary>
+
+![chaoskit check: steady state passing against both probes](docs/screenshots/02-check-pass.png)
+
+![chaoskit check: steady state violated, error-rate probe failing](docs/screenshots/03-check-fail.png)
+
+![chaoskit --help: validate, check, run subcommands](docs/screenshots/04-help.png)
+
+</details>
+
 ## Project Status
 
 **Active development** — built in public, nightly progress.
