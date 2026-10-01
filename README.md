@@ -23,6 +23,10 @@ same pattern the test suite uses):
 
 ![chaoskit --help: validate, check, run subcommands](docs/screenshots/04-help.png)
 
+![chaoskit validate against the cpu-stress example experiment](docs/screenshots/05-validate-cpu-stress.png)
+
+![chaoskit check against the network-latency example experiment](docs/screenshots/06-check-network-latency.png)
+
 </details>
 
 ## Project Status
