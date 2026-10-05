@@ -45,25 +45,47 @@ class CoreV1KubernetesClient:
                 "the 'kubernetes' package is required to inject chaos; "
                 "install it with: pip install kubernetes"
             ) from exc
+        from kubernetes.client.exceptions import ApiException
+        from kubernetes.config.config_exception import ConfigException
+        from urllib3.exceptions import MaxRetryError
+
+        # Caught around every API call below so connection/auth failures
+        # surface as a clean KubernetesError instead of a raw urllib3 or
+        # kubernetes-client traceback.
+        self._connection_errors = (MaxRetryError, ApiException)
         try:
             config.load_kube_config()
         except Exception:
-            config.load_incluster_config()
+            try:
+                config.load_incluster_config()
+            except ConfigException as exc:
+                raise KubernetesError(
+                    f"could not load a Kubernetes configuration: {exc}"
+                ) from exc
         self._core = client.CoreV1Api()
 
+    def _call(self, fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except self._connection_errors as exc:
+            raise KubernetesError(f"could not reach the Kubernetes API: {exc}") from exc
+
     def list_pods(self, namespace: str, label_selector: str) -> list[str]:
-        pods = self._core.list_namespaced_pod(
-            namespace=namespace, label_selector=label_selector
+        pods = self._call(
+            self._core.list_namespaced_pod,
+            namespace=namespace,
+            label_selector=label_selector,
         )
         return [pod.metadata.name for pod in pods.items]
 
     def delete_pod(self, namespace: str, name: str) -> None:
-        self._core.delete_namespaced_pod(name=name, namespace=namespace)
+        self._call(self._core.delete_namespaced_pod, name=name, namespace=namespace)
 
     def exec_in_pod(self, namespace: str, name: str, command: list[str]) -> None:
         from kubernetes.stream import stream
 
-        stream(
+        self._call(
+            stream,
             self._core.connect_get_namespaced_pod_exec,
             name=name,
             namespace=namespace,

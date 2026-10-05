@@ -184,3 +184,32 @@ def test_run_without_kubernetes_package(experiment_file, monkeypatch, capsys):
     rc = main(["run", str(experiment_file)])
     assert rc == 2
     assert "ERROR" in capsys.readouterr().err
+
+
+def test_run_kubernetes_unreachable(experiment_file, prometheus, monkeypatch, capsys):
+    """A cluster that can't be reached must print a clean ERROR line, not a
+    raw urllib3/kubernetes-client traceback."""
+    import chaoskit.cli
+    from chaoskit.injectors.kubernetes import KubernetesError
+
+    class UnreachableKubernetesClient:
+        def list_pods(self, namespace, label_selector):
+            raise KubernetesError("could not reach the Kubernetes API: connection refused")
+
+        def delete_pod(self, namespace, name):
+            raise KubernetesError("could not reach the Kubernetes API: connection refused")
+
+        def exec_in_pod(self, namespace, name, command):
+            raise KubernetesError("could not reach the Kubernetes API: connection refused")
+
+    prometheus.respond_value(0.001)  # pre-check passes, so injection is attempted
+    monkeypatch.setattr(
+        chaoskit.cli, "_build_kubernetes_client", UnreachableKubernetesClient
+    )
+    rc = main(
+        ["run", str(experiment_file), "--prometheus", prometheus.url, "--settle", "0"]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "ERROR" in err
+    assert "Traceback" not in err
