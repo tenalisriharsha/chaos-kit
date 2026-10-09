@@ -75,3 +75,18 @@ def test_prometheus_client_unreachable():
     client = PrometheusClient("http://127.0.0.1:1", timeout=0.5)
     with pytest.raises(SteadyStateError, match="failed"):
         client.query("up")
+
+
+def test_prometheus_client_non_json_response(prometheus):
+    # e.g. --prometheus pointing at Grafana or an auth proxy login page
+    prometheus.respond_raw(b"<html>not prometheus</html>")
+    client = PrometheusClient(prometheus.url)
+    with pytest.raises(SteadyStateError, match="non-JSON"):
+        client.query("up")
+
+
+def test_prometheus_client_non_object_json_response(prometheus):
+    prometheus.respond(["not", "an", "object"])
+    client = PrometheusClient(prometheus.url)
+    with pytest.raises(SteadyStateError, match="error"):
+        client.query("up")

@@ -43,8 +43,12 @@ class PrometheusClient:
                 payload = json.loads(resp.read().decode("utf-8"))
         except OSError as exc:
             raise SteadyStateError(f"prometheus query failed: {exc}") from exc
+        except ValueError as exc:  # JSONDecodeError, UnicodeDecodeError
+            raise SteadyStateError(
+                f"prometheus returned a non-JSON response from {url}: {exc}"
+            ) from exc
 
-        if payload.get("status") != "success":
+        if not isinstance(payload, dict) or payload.get("status") != "success":
             raise SteadyStateError(f"prometheus returned an error: {payload!r}")
         result = payload.get("data", {}).get("result", [])
         if not result:

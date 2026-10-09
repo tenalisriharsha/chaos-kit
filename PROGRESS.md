@@ -81,7 +81,9 @@ YAML experiment file
 ## Project complete
 
 All three phases are done, the full suite passes
-(`.venv/bin/python -m pytest` -> 70 passed), the README is final, and
+(`.venv/bin/python -m pytest` -> 70 passed at the end of phase 3; 85 after
+the post-review error-handling fixes, now run by CI on Python 3.10-3.13),
+the README is final, and
 [DAILY_REPORT.md](DAILY_REPORT.md) summarizes the whole build.
 
 Possible future ideas (not planned): experiment scheduling/rollbacks,

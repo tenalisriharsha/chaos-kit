@@ -213,3 +213,31 @@ def test_run_kubernetes_unreachable(experiment_file, prometheus, monkeypatch, ca
     err = capsys.readouterr().err
     assert "ERROR" in err
     assert "Traceback" not in err
+
+
+def test_check_non_json_prometheus_response(experiment_file, prometheus, capsys):
+    prometheus.respond_raw(b"<html>login</html>")
+    assert main(["check", str(experiment_file), "--prometheus", prometheus.url]) == 2
+    assert "ERROR: prometheus returned a non-JSON response" in capsys.readouterr().err
+
+
+def test_validate_undecodable_file(tmp_path, capsys):
+    path = tmp_path / "binary.yaml"
+    path.write_bytes(b"\xff\xfe\x00not utf-8")
+    assert main(["validate", str(path)]) == 2
+    assert "INVALID: cannot read experiment file" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("settle", ["-1", "nan", "inf", "soon"])
+def test_run_rejects_invalid_settle_before_injecting(
+    experiment_file, prometheus, fake_k8s, settle, capsys
+):
+    # Previously '--settle -1' deleted pods and then crashed in time.sleep()
+    # with a traceback and no report.
+    with pytest.raises(SystemExit) as excinfo:
+        main(["run", str(experiment_file), "--prometheus", prometheus.url,
+              "--settle", settle])
+    assert excinfo.value.code == 2
+    assert "--settle" in capsys.readouterr().err
+    assert fake_k8s.deleted == []
+    assert prometheus.queries == []

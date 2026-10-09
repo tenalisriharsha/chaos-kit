@@ -9,8 +9,10 @@ report.
 
 ## Preview
 
-Real CLI output (a stubbed Prometheus backend standing in for a live one,
-same pattern the test suite uses):
+Real CLI output, captured by [docs/screenshots/generate.py](docs/screenshots/generate.py),
+which runs each command shown and draws its output verbatim. The `check`
+views run against a stub Prometheus that the script serves on
+`127.0.0.1:9090` (the same pattern the test suite uses), not a live one:
 
 ![chaoskit validate: experiment summary, exits 0](docs/screenshots/01-validate.png)
 
@@ -31,15 +33,17 @@ same pattern the test suite uses):
 
 ## Project Status
 
-**Active development** — built in public, nightly progress.
-See [PROGRESS.md](PROGRESS.md) for the vision, architecture, phased build
-plan, and exactly where the build currently stands.
+**Feature-complete for the planned scope (phases 1-3).**
+See [PROGRESS.md](PROGRESS.md) for the vision, architecture and phased build
+plan.
 
 Current state: **Phase 3 complete** — experiment schema, steady-state
 verification against Prometheus, Kubernetes chaos injectors (`pod_kill`,
 `cpu_stress`, `network_latency`), an experiment runner, pass/fail
 resilience reports (text and JSON), and a CLI (`validate`, `check`,
-`run`), fully tested.
+`run`). The suite covers every module, using a stub Prometheus and a fake
+Kubernetes client; the real Kubernetes path has not been exercised against
+a live cluster (see [Known limitations](DAILY_REPORT.md#known-limitations)).
 
 ## Experiment format
 
@@ -93,7 +97,8 @@ chaoskit run examples/experiment.yaml --prometheus http://localhost:9090 --json
 
 `chaoskit run` ends with a pass/fail resilience report covering the
 verdict, pre/post steady-state probes, every injected action, and
-wall-clock timing (total duration and recovery time):
+wall-clock timing (total duration and recovery time). Example (pod names
+and timings are illustrative):
 
 ```
 chaos-kit resilience report
@@ -150,4 +155,4 @@ python3 -m venv .venv
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
