@@ -55,12 +55,16 @@ class CoreV1KubernetesClient:
         self._connection_errors = (MaxRetryError, ApiException)
         try:
             config.load_kube_config()
-        except Exception:
+        except Exception as kubeconfig_exc:
             try:
                 config.load_incluster_config()
             except ConfigException as exc:
+                # Report both attempts: outside a cluster the in-cluster
+                # error alone ("Service host/port is not set") hides the
+                # real problem with the user's kubeconfig.
                 raise KubernetesError(
-                    f"could not load a Kubernetes configuration: {exc}"
+                    "could not load a Kubernetes configuration: "
+                    f"kubeconfig: {kubeconfig_exc}; in-cluster: {exc}"
                 ) from exc
         self._core = client.CoreV1Api()
 
