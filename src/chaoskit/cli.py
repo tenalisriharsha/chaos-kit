@@ -140,7 +140,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     metrics = PrometheusClient(args.prometheus)
     try:
         result = run_experiment(exp, metrics, kubernetes, settle_seconds=args.settle)
-    except (SteadyStateError, InjectionError) as exc:
+    except (SteadyStateError, InjectionError, KubernetesError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
