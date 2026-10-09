@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 
 from chaoskit.experiment import ExperimentError, load_experiment
@@ -16,6 +17,23 @@ from chaoskit.steadystate import (
     all_passed,
     verify_steady_state,
 )
+
+
+def _settle_seconds(value: str) -> float:
+    """argparse type for --settle: a finite number of seconds >= 0.
+
+    Validated up front because the runner only sleeps after chaos has been
+    injected; a bad value must not crash the run at that point.
+    """
+    try:
+        seconds = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {value!r}") from None
+    if not math.isfinite(seconds) or seconds < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite number of seconds >= 0, got {value!r}"
+        )
+    return seconds
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument(
         "--settle",
-        type=float,
+        type=_settle_seconds,
         default=10.0,
         help="Seconds to wait after injection before re-checking (default: 10).",
     )
