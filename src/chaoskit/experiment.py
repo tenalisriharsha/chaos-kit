@@ -188,6 +188,11 @@ def _parse_actions(raw: Any, errors: list[str]) -> list[Action]:
         ).strip():
             errors.append(f"{prefix}.target.label_selector: required non-empty string")
             ok = False
+        elif "namespace" in target and (
+            not isinstance(target["namespace"], str) or not target["namespace"].strip()
+        ):
+            errors.append(f"{prefix}.target.namespace: must be a non-empty string")
+            ok = False
         if not isinstance(params, dict):
             errors.append(f"{prefix}.params: must be a mapping")
             ok = False

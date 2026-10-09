@@ -174,3 +174,11 @@ def test_load_experiment_undecodable_file(tmp_path):
     path.write_bytes(b"\xff\xfe\x00not utf-8")
     with pytest.raises(ExperimentError, match="cannot read"):
         load_experiment(path)
+
+
+@pytest.mark.parametrize("namespace", [None, "", "  ", 123])
+def test_action_namespace_must_be_non_empty_string(namespace):
+    target = {"namespace": namespace, "label_selector": "app=api"}
+    data = {**VALID, "actions": [{"type": "pod_kill", "target": target}]}
+    with pytest.raises(ExperimentError, match=r"actions\[0\]\.target\.namespace"):
+        parse_experiment(data)
