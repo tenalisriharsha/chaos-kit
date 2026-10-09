@@ -69,7 +69,11 @@ def load_experiment(path: str | Path) -> Experiment:
     if not p.is_file():
         raise ExperimentError(f"experiment file not found: {p}")
     try:
-        data = yaml.safe_load(p.read_text(encoding="utf-8"))
+        text = p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ExperimentError(f"cannot read experiment file {p}: {exc}") from exc
+    try:
+        data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise ExperimentError(f"invalid YAML in {p}: {exc}") from exc
     return parse_experiment(data)

@@ -219,3 +219,10 @@ def test_check_non_json_prometheus_response(experiment_file, prometheus, capsys)
     prometheus.respond_raw(b"<html>login</html>")
     assert main(["check", str(experiment_file), "--prometheus", prometheus.url]) == 2
     assert "ERROR: prometheus returned a non-JSON response" in capsys.readouterr().err
+
+
+def test_validate_undecodable_file(tmp_path, capsys):
+    path = tmp_path / "binary.yaml"
+    path.write_bytes(b"\xff\xfe\x00not utf-8")
+    assert main(["validate", str(path)]) == 2
+    assert "INVALID: cannot read experiment file" in capsys.readouterr().err

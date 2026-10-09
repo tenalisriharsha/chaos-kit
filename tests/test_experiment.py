@@ -167,3 +167,10 @@ def test_load_experiment_bad_yaml(tmp_path):
     path.write_text("name: [unclosed")
     with pytest.raises(ExperimentError, match="invalid YAML"):
         load_experiment(path)
+
+
+def test_load_experiment_undecodable_file(tmp_path):
+    path = tmp_path / "binary.yaml"
+    path.write_bytes(b"\xff\xfe\x00not utf-8")
+    with pytest.raises(ExperimentError, match="cannot read"):
+        load_experiment(path)
