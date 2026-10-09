@@ -213,3 +213,9 @@ def test_run_kubernetes_unreachable(experiment_file, prometheus, monkeypatch, ca
     err = capsys.readouterr().err
     assert "ERROR" in err
     assert "Traceback" not in err
+
+
+def test_check_non_json_prometheus_response(experiment_file, prometheus, capsys):
+    prometheus.respond_raw(b"<html>login</html>")
+    assert main(["check", str(experiment_file), "--prometheus", prometheus.url]) == 2
+    assert "ERROR: prometheus returned a non-JSON response" in capsys.readouterr().err

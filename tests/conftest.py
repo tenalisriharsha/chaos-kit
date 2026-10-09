@@ -12,12 +12,16 @@ class _StubPrometheus:
     """Serves canned /api/v1/query responses and records queries."""
 
     def __init__(self):
-        self._responses: list[dict] = []
+        self._responses: list[dict | bytes] = []
         self.queries: list[str] = []
         self.url = ""
 
     def respond(self, payload: dict) -> None:
         self._responses.append(payload)
+
+    def respond_raw(self, body: bytes) -> None:
+        """Serve ``body`` verbatim instead of a JSON-encoded payload."""
+        self._responses.append(body)
 
     def respond_value(self, value: float) -> None:
         self.respond(
@@ -43,7 +47,10 @@ def prometheus():
                 "status": "success",
                 "data": {"result": []},
             }
-            body = json.dumps(payload).encode()
+            if isinstance(payload, bytes):
+                body = payload
+            else:
+                body = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
