@@ -1,5 +1,9 @@
 """Tests for the chaos injectors against a fake Kubernetes client."""
 
+import os
+import subprocess
+import time
+
 import pytest
 
 from chaoskit.experiment import Action
@@ -20,6 +24,31 @@ def _action(type_: str, **params) -> Action:
         target={"namespace": "default", "label_selector": "app=api"},
         params=params,
     )
+
+
+def _fake_bin(tmp_path, name, body):
+    """Write an executable shell script ``name`` into tmp_path/bin."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    path = bin_dir / name
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+    return bin_dir
+
+
+def _run_in_pod_shell(command, bin_dir):
+    """Run an exec'd command locally, as the pod's shell would."""
+    env = dict(os.environ, PATH=f"{bin_dir}:/usr/bin:/bin")
+    return subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+
+
+def _wait_for(predicate, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
 
 
 @pytest.fixture
@@ -102,6 +131,27 @@ class TestNetworkLatency:
     def test_invalid_latency_raises(self, k8s):
         with pytest.raises(InjectionError, match="latency_ms"):
             inject_network_latency(_action("network_latency", latency_ms=0), k8s)
+
+    def test_tc_failure_fails_the_exec(self, k8s, tmp_path):
+        # Seen on a real cluster: a kernel without netem made tc fail, but
+        # the whole script ran detached with output discarded, so the exec
+        # succeeded and the latency was reported as injected.
+        bin_dir = _fake_bin(
+            tmp_path, "tc", "echo 'Error: Specified qdisc kind is unknown.' >&2; exit 2"
+        )
+        inject_network_latency(_action("network_latency"), k8s)
+        proc = _run_in_pod_shell(k8s.execs[0][2], bin_dir)
+        assert proc.returncode == 2
+        assert "qdisc kind is unknown" in proc.stderr
+
+    def test_adds_qdisc_now_and_removes_it_after_duration(self, k8s, tmp_path):
+        log = tmp_path / "tc.log"
+        bin_dir = _fake_bin(tmp_path, "tc", f'echo "$*" >> {log}')
+        inject_network_latency(_action("network_latency", duration=1), k8s)
+        proc = _run_in_pod_shell(k8s.execs[0][2], bin_dir)
+        assert proc.returncode == 0
+        assert log.read_text() == "qdisc add dev eth0 root netem delay 100ms\n"
+        assert _wait_for(lambda: "qdisc del" in log.read_text())
 
 
 class TestDispatch:

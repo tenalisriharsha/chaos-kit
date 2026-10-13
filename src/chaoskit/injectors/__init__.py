@@ -96,16 +96,16 @@ def inject_network_latency(action: Action, client: KubernetesClient) -> str:
     duration = _duration_seconds(action, default=30)
     pods = _resolve_pods(action, client)
     namespace = action.target["namespace"]
-    # Run detached so the qdisc is removed automatically after the duration.
+    # Add the qdisc in the foreground so a missing tc, a missing NET_ADMIN
+    # capability or a kernel without netem fails the exec; only the cleanup
+    # runs detached, removing the qdisc automatically after the duration.
+    cleanup = f"sleep {duration}; tc qdisc del dev eth0 root netem delay {latency_ms}ms"
     script = (
-        f"tc qdisc add dev eth0 root netem delay {latency_ms}ms; "
-        f"sleep {duration}; "
-        f"tc qdisc del dev eth0 root netem delay {latency_ms}ms"
+        f"tc qdisc add dev eth0 root netem delay {latency_ms}ms || exit $?; "
+        f"nohup sh -c '{cleanup}' >/dev/null 2>&1 &"
     )
     for name in pods:
-        client.exec_in_pod(
-            namespace, name, ["sh", "-c", f"nohup sh -c '{script}' >/dev/null 2>&1 &"]
-        )
+        client.exec_in_pod(namespace, name, ["sh", "-c", script])
     return (
         f"added {latency_ms}ms latency for {duration}s "
         f"in {len(pods)} pod(s): {', '.join(pods)}"
