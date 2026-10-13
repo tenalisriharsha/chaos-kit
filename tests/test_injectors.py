@@ -91,16 +91,40 @@ class TestCpuStress:
         assert len(k8s.execs) == 3
         namespace, name, command = k8s.execs[0]
         assert (namespace, name) == ("default", "api-1")
-        assert command == ["stress-ng", "--cpu", "1", "--timeout", "30s"]
+        assert command[:2] == ["sh", "-c"]
+        assert "stress-ng --cpu 1 --timeout 30s" in command[2]
 
     def test_honors_cores_and_duration_params(self, k8s):
         inject_cpu_stress(_action("cpu_stress", cores=4, duration="90s"), k8s)
-        assert k8s.execs[0][2] == ["stress-ng", "--cpu", "4", "--timeout", "90s"]
+        assert "stress-ng --cpu 4 --timeout 90s" in k8s.execs[0][2][2]
 
     def test_duration_accepts_plain_seconds(self, k8s):
         inject_cpu_stress(_action("cpu_stress", duration=45), k8s)
-        assert "--timeout" in k8s.execs[0][2]
-        assert "45s" in k8s.execs[0][2]
+        assert "--timeout 45s" in k8s.execs[0][2][2]
+
+    def test_exec_returns_while_stress_keeps_running(self, k8s, tmp_path):
+        # Seen on a real cluster: the exec blocked for the full duration,
+        # so two pods were stressed one after the other and the post-check
+        # ran after all stress had ended.
+        log = tmp_path / "stress.log"
+        bin_dir = _fake_bin(tmp_path, "stress-ng", f'echo "$*" >> {log}; sleep 3')
+        inject_cpu_stress(_action("cpu_stress", cores=2, duration=3), k8s)
+        started = time.monotonic()
+        proc = _run_in_pod_shell(k8s.execs[0][2], bin_dir)
+        assert proc.returncode == 0
+        assert time.monotonic() - started < 2
+        assert _wait_for(lambda: log.exists() and log.read_text())
+        assert log.read_text() == "--cpu 2 --timeout 3s\n"
+
+    def test_missing_stress_ng_fails_the_exec(self, k8s, tmp_path):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        if any(os.access(f"{d}/stress-ng", os.X_OK) for d in ("/usr/bin", "/bin")):
+            pytest.skip("stress-ng is installed on this machine")
+        inject_cpu_stress(_action("cpu_stress"), k8s)
+        proc = _run_in_pod_shell(k8s.execs[0][2], bin_dir)
+        assert proc.returncode == 127
+        assert "stress-ng: not found" in proc.stderr
 
     def test_invalid_duration_raises(self, k8s):
         with pytest.raises(InjectionError, match="duration"):
