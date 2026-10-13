@@ -66,8 +66,9 @@ both report renderers, and every CLI subcommand.
 - The runner is sequential: one experiment, actions in order, single
   settle window. No scheduling, parallelism, or rollback actions.
 - Reports go to stdout only; no persistence or export (Slack, Grafana).
-- The real Kubernetes path is covered by unit tests against a fake client;
-  it has not been run against a live cluster in this repo.
+- The real Kubernetes path was first run against a live cluster after
+  this report; see [docs/real-cluster.md](docs/real-cluster.md) for what
+  was verified, what was not, and the bugs it exposed.
 
 ## Future ideas
 
