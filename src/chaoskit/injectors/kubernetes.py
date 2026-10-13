@@ -18,7 +18,10 @@ class KubernetesClient(Protocol):
     """The subset of the Kubernetes API the injectors rely on."""
 
     def list_pods(self, namespace: str, label_selector: str) -> list[str]:
-        """Return the names of pods matching a label selector."""
+        """Return the names of running pods matching a label selector.
+
+        Pods that are already terminating or not yet running are skipped.
+        """
         ...
 
     def delete_pod(self, namespace: str, name: str) -> None:
@@ -26,7 +29,10 @@ class KubernetesClient(Protocol):
         ...
 
     def exec_in_pod(self, namespace: str, name: str, command: list[str]) -> None:
-        """Run a command inside the pod's first container."""
+        """Run a command inside the pod's first container.
+
+        Raises ``KubernetesError`` if the command exits non-zero.
+        """
         ...
 
 
@@ -80,7 +86,17 @@ class CoreV1KubernetesClient:
             namespace=namespace,
             label_selector=label_selector,
         )
-        return [pod.metadata.name for pod in pods.items]
+        # A deleted pod stays listed (phase Running) until its grace period
+        # ends, and its replacement is listed while still Pending. On a real
+        # cluster, network_latency right after pod_kill picked the pod that
+        # had just been deleted.
+        return [
+            pod.metadata.name
+            for pod in pods.items
+            if pod.metadata.deletion_timestamp is None
+            and pod.status is not None
+            and pod.status.phase == "Running"
+        ]
 
     def delete_pod(self, namespace: str, name: str) -> None:
         self._call(self._core.delete_namespaced_pod, name=name, namespace=namespace)
@@ -88,7 +104,10 @@ class CoreV1KubernetesClient:
     def exec_in_pod(self, namespace: str, name: str, command: list[str]) -> None:
         from kubernetes.stream import stream
 
-        self._call(
+        # Without _preload_content=False the client returns the output as a
+        # string and drops the exit status, so a missing binary or a failing
+        # command would look like a successful injection.
+        resp = self._call(
             stream,
             self._core.connect_get_namespaced_pod_exec,
             name=name,
@@ -98,4 +117,24 @@ class CoreV1KubernetesClient:
             stdin=False,
             stdout=True,
             tty=False,
+            _preload_content=False,
         )
+        try:
+            resp.run_forever()
+            try:
+                returncode = resp.returncode
+            except (TypeError, KeyError, IndexError, ValueError):
+                returncode = None
+            output = resp.read_all().strip()
+        finally:
+            resp.close()
+        if returncode != 0:
+            status = (
+                "did not report an exit status"
+                if returncode is None
+                else f"exited with status {returncode}"
+            )
+            raise KubernetesError(
+                f"command {command!r} in pod {namespace}/{name} {status}"
+                + (f": {output}" if output else "")
+            )

@@ -11,8 +11,10 @@ report.
 
 Real CLI output, captured by [docs/screenshots/generate.py](docs/screenshots/generate.py),
 which runs each command shown and draws its output verbatim. The `check`
-views run against a stub Prometheus that the script serves on
-`127.0.0.1:9090` (the same pattern the test suite uses), not a live one:
+and `run` views run against a stub Prometheus that the script serves on
+`127.0.0.1:9090` (the same pattern the test suite uses), not a live one.
+The `run` views run against a real k3s cluster, set up as described in
+[docs/real-cluster.md](docs/real-cluster.md):
 
 ![chaoskit validate: experiment summary, exits 0](docs/screenshots/01-validate.png)
 
@@ -29,6 +31,16 @@ views run against a stub Prometheus that the script serves on
 
 ![chaoskit check against the network-latency example experiment](docs/screenshots/06-check-network-latency.png)
 
+![chaoskit run on a real cluster: pod_kill deletes one api pod, Kubernetes replaces it, exit 0](docs/screenshots/07-run-pod-kill.png)
+
+![chaoskit run on a real cluster: post-injection check violated, FAILED, exit 1](docs/screenshots/08-run-pod-kill-fails-post-check.png)
+
+![chaoskit run on a real cluster: cpu_stress leaves stress-ng running in the cache pods](docs/screenshots/09-run-cpu-stress.png)
+
+![chaoskit run on a real cluster: network_latency fails on a kernel without netem, exit 2](docs/screenshots/10-run-network-latency-no-netem.png)
+
+![chaoskit run on a real cluster: examples/experiment.yaml stops at network_latency, no tc in nginx, exit 2](docs/screenshots/11-run-experiment-no-tc.png)
+
 </details>
 
 ## Project Status
@@ -42,8 +54,21 @@ verification against Prometheus, Kubernetes chaos injectors (`pod_kill`,
 `cpu_stress`, `network_latency`), an experiment runner, pass/fail
 resilience reports (text and JSON), and a CLI (`validate`, `check`,
 `run`). The suite covers every module, using a stub Prometheus and a fake
-Kubernetes client; the real Kubernetes path has not been exercised against
-a live cluster (see [Known limitations](DAILY_REPORT.md#known-limitations)).
+Kubernetes client.
+
+`chaoskit run` has been run against one real cluster (single-node k3s, see
+[docs/real-cluster.md](docs/real-cluster.md) for exactly what was run):
+
+- **Verified:** `pod_kill` deletes the matching pod and the Deployment
+  replaces it; `cpu_stress` runs `stress-ng` in every matching pod at once
+  while the post-check runs; the pre/post steady-state checks, the abort
+  path, the text and JSON reports, and exit codes `0`/`1`/`2`; clear
+  errors when `stress-ng`, `tc`, `NET_ADMIN` or kernel netem support is
+  missing.
+- **Not verified:** `network_latency` actually adding and then removing
+  latency (that kernel has no netem); a real Prometheus (steady-state
+  values were stubbed); multi-node clusters, other runtimes, in-cluster
+  configuration and restricted RBAC.
 
 ## Experiment format
 
@@ -72,6 +97,8 @@ example. More ready-to-adapt experiments live in the
 
 - [examples/experiment.yaml](examples/experiment.yaml) — pod kill plus
   network latency against an API service
+- [examples/pod-kill.yaml](examples/pod-kill.yaml) — a single pod kill
+  (the experiment shown above)
 - [examples/cpu-stress.yaml](examples/cpu-stress.yaml) — CPU saturation
   on cache pods
 - [examples/network-latency.yaml](examples/network-latency.yaml) —
@@ -137,8 +164,13 @@ setup/validation error.
 | `network_latency` | Adds egress latency via `tc`/netem, self-cleaning | `latency_ms` (100), `duration` (30s) |
 
 Actions target pods via `target.namespace` and `target.label_selector`.
-`cpu_stress` needs `stress-ng` in the container image; `network_latency`
-needs `tc` (iproute2) and the `NET_ADMIN` capability.
+`cpu_stress` needs `sh` and `stress-ng` in the container image;
+`network_latency` needs `sh`, `tc` (iproute2), the `NET_ADMIN` capability
+and a node kernel with netem (`sch_netem`). If any of these is missing the
+run stops with an `ERROR` naming the pod and the command's output, and
+exits `2`. Both run detached in the pods and end on their own after
+`duration`. Only pods that are `Running` and not terminating are
+targeted.
 
 `chaoskit run` requires a kubeconfig (or in-cluster config) and the optional
 `kubernetes` Python package (`pip install kubernetes`). It verifies the

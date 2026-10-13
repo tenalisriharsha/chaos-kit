@@ -69,18 +69,23 @@ def inject_pod_kill(action: Action, client: KubernetesClient) -> str:
 def inject_cpu_stress(action: Action, client: KubernetesClient) -> str:
     """Run stress-ng inside the target pods to consume CPU.
 
-    Requires the ``stress-ng`` binary in the pod's container image.
+    Requires ``sh`` and the ``stress-ng`` binary in the pod's container image.
     """
     cores = _int_param(action, "cores", 1)
     duration = _duration_seconds(action, default=30)
     pods = _resolve_pods(action, client)
     namespace = action.target["namespace"]
+    # Run stress-ng detached: exec'd in the foreground it blocked for the
+    # whole duration, so pods were stressed one after another and the
+    # post-injection check only ran once every stress had ended. The
+    # foreground check still fails the exec when stress-ng is missing.
+    script = (
+        "command -v stress-ng >/dev/null 2>&1 "
+        "|| { echo 'stress-ng: not found' >&2; exit 127; }; "
+        f"nohup stress-ng --cpu {cores} --timeout {duration}s >/dev/null 2>&1 &"
+    )
     for name in pods:
-        client.exec_in_pod(
-            namespace,
-            name,
-            ["stress-ng", "--cpu", str(cores), "--timeout", f"{duration}s"],
-        )
+        client.exec_in_pod(namespace, name, ["sh", "-c", script])
     return (
         f"stressed {cores} core(s) for {duration}s "
         f"in {len(pods)} pod(s): {', '.join(pods)}"
@@ -96,16 +101,16 @@ def inject_network_latency(action: Action, client: KubernetesClient) -> str:
     duration = _duration_seconds(action, default=30)
     pods = _resolve_pods(action, client)
     namespace = action.target["namespace"]
-    # Run detached so the qdisc is removed automatically after the duration.
+    # Add the qdisc in the foreground so a missing tc, a missing NET_ADMIN
+    # capability or a kernel without netem fails the exec; only the cleanup
+    # runs detached, removing the qdisc automatically after the duration.
+    cleanup = f"sleep {duration}; tc qdisc del dev eth0 root netem delay {latency_ms}ms"
     script = (
-        f"tc qdisc add dev eth0 root netem delay {latency_ms}ms; "
-        f"sleep {duration}; "
-        f"tc qdisc del dev eth0 root netem delay {latency_ms}ms"
+        f"tc qdisc add dev eth0 root netem delay {latency_ms}ms || exit $?; "
+        f"nohup sh -c '{cleanup}' >/dev/null 2>&1 &"
     )
     for name in pods:
-        client.exec_in_pod(
-            namespace, name, ["sh", "-c", f"nohup sh -c '{script}' >/dev/null 2>&1 &"]
-        )
+        client.exec_in_pod(namespace, name, ["sh", "-c", script])
     return (
         f"added {latency_ms}ms latency for {duration}s "
         f"in {len(pods)} pod(s): {', '.join(pods)}"

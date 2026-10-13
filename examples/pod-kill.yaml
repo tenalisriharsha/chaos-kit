@@ -1,0 +1,16 @@
+name: api-pod-kill-resilience
+description: Kill one API pod and verify the service stays healthy.
+
+steady_state:
+  - name: low-error-rate
+    query: rate(http_requests_total{status=~"5.."}[5m])
+    operator: lt
+    threshold: 0.01
+
+actions:
+  - type: pod_kill
+    target:
+      namespace: default
+      label_selector: app=api
+    params:
+      count: 1
