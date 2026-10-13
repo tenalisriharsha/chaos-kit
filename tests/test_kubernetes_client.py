@@ -85,9 +85,12 @@ class FakeExecStream:
 @pytest.fixture
 def connected_client(stub_kubernetes, monkeypatch):
     """A CoreV1KubernetesClient whose config loads and whose exec is faked."""
-    exec_ = types.SimpleNamespace(calls=[], response=None)
+    exec_ = types.SimpleNamespace(calls=[], response=None, pods=[])
 
     class CoreV1Api:
+        def list_namespaced_pod(self, namespace, label_selector):
+            return types.SimpleNamespace(items=exec_.pods)
+
         def connect_get_namespaced_pod_exec(self, *args, **kwargs):
             raise AssertionError("must be called through kubernetes.stream.stream")
 
@@ -136,3 +139,26 @@ def test_exec_in_pod_raises_without_exit_status(connected_client):
     exec_.response = FakeExecStream(None)
     with pytest.raises(KubernetesError, match="did not report an exit status"):
         client.exec_in_pod("default", "api-1", ["true"])
+
+
+def _pod(name, phase="Running", deleting=False):
+    return types.SimpleNamespace(
+        metadata=types.SimpleNamespace(
+            name=name, deletion_timestamp="2026-10-13T00:00:00Z" if deleting else None
+        ),
+        status=types.SimpleNamespace(phase=phase),
+    )
+
+
+def test_list_pods_skips_terminating_and_not_running_pods(connected_client):
+    # Seen on a real cluster: right after pod_kill, the deleted pod is
+    # still listed as Running (with a deletion timestamp) and its
+    # replacement is Pending. Neither is a valid chaos target.
+    client, exec_ = connected_client
+    exec_.pods = [
+        _pod("api-a", deleting=True),
+        _pod("api-b"),
+        _pod("api-c", phase="Pending"),
+        _pod("api-d"),
+    ]
+    assert client.list_pods("default", "app=api") == ["api-b", "api-d"]
