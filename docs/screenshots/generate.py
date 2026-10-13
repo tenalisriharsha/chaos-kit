@@ -7,23 +7,32 @@ second prompt so the exit code shown is the real one. Nothing is typed or
 edited by hand; long lines are only soft-wrapped at the window width, the
 way a terminal would.
 
-The ``check`` screenshots need a Prometheus. This script serves a stub
-Prometheus HTTP API on 127.0.0.1:9090 (the same idea as the test suite's
-fixture) that answers each PromQL query with a fixed value per scenario,
-and the commands shown point at exactly that address.
+The ``check`` and ``run`` screenshots need a Prometheus. This script serves
+a stub Prometheus HTTP API on 127.0.0.1:9090 (the same idea as the test
+suite's fixture) that answers each PromQL query with a fixed value per
+scenario, and the commands shown point at exactly that address. A value
+given as a list is served in order, one per query, repeating the last.
+
+The ``--cluster`` screenshots run ``chaoskit run`` (and ``kubectl``) against
+the real Kubernetes cluster in the current kubeconfig, set up as described
+in docs/real-cluster.md. A shot with several commands runs each one in its
+own bash, in order, and draws each with its own ``echo $?``.
 
 Requirements: chaos-kit installed (``pip install -e .``) so ``chaoskit`` is
 on PATH, Pillow (``pip install pillow``), and the DejaVu Sans Mono font.
+For ``--cluster``: ``kubectl`` and the ``kubernetes`` package as well.
 
 Usage, from the repository root:
 
-    python docs/screenshots/generate.py
+    python docs/screenshots/generate.py            # no cluster needed
+    python docs/screenshots/generate.py --cluster  # real-cluster shots only
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import textwrap
 import threading
 from contextlib import contextmanager
@@ -41,6 +50,10 @@ PROMETHEUS_URL = f"http://{PROMETHEUS_HOST}:{PROMETHEUS_PORT}"
 ERROR_RATE = 'rate(http_requests_total{status=~"5.."}[5m])'
 P99_LATENCY = "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))"
 CHECKOUT_ERROR_RATE = 'rate(http_requests_total{app="checkout",status=~"5.."}[5m])'
+CACHE_P99_LATENCY = (
+    'histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{app="cache"}[5m]))'
+)
+CACHE_TIMEOUTS = 'rate(http_requests_total{app="cache",status="504"}[5m])'
 
 # (file name, command, stub Prometheus values by PromQL query or None)
 SHOTS = [
@@ -64,6 +77,43 @@ SHOTS = [
     ),
 ]
 
+# Real-cluster shots: (file name, commands, stub Prometheus values). Values
+# are given for the probes of the experiment each shot runs.
+CLUSTER_SHOTS = [
+    (
+        "07-run-pod-kill.png",
+        [
+            "kubectl get pods -l app=api",
+            f"chaoskit run examples/pod-kill.yaml --prometheus {PROMETHEUS_URL}",
+            "kubectl get pods -l app=api",
+        ],
+        {ERROR_RATE: 0.002},
+    ),
+    (
+        "08-run-pod-kill-fails-post-check.png",
+        [f"chaoskit run examples/pod-kill.yaml --prometheus {PROMETHEUS_URL}"],
+        {ERROR_RATE: [0.002, 0.04]},
+    ),
+    (
+        "09-run-cpu-stress.png",
+        [
+            f"chaoskit run examples/cpu-stress.yaml --prometheus {PROMETHEUS_URL}",
+            "kubectl exec deploy/cache -- ps -o pid,args",
+        ],
+        {CACHE_P99_LATENCY: 0.08, CACHE_TIMEOUTS: 0},
+    ),
+    (
+        "10-run-network-latency-no-netem.png",
+        [f"chaoskit run examples/network-latency.yaml --prometheus {PROMETHEUS_URL}"],
+        {CHECKOUT_ERROR_RATE: 0.003},
+    ),
+    (
+        "11-run-experiment-no-tc.png",
+        [f"chaoskit run examples/experiment.yaml --prometheus {PROMETHEUS_URL}"],
+        {ERROR_RATE: 0.002, P99_LATENCY: 0.12},
+    ),
+]
+
 COLUMNS = 100
 FONT_SIZE = 15
 PAD_X, PAD_Y, TITLE_H = 20, 18, 34
@@ -76,7 +126,17 @@ FONT_PATHS = [
 
 
 @contextmanager
-def stub_prometheus(values: dict[str, float]):
+def stub_prometheus(values: dict[str, float | list[float]]):
+    served: dict[str, int] = {}
+
+    def next_value(query: str) -> float:
+        value = values[query]
+        if not isinstance(value, list):
+            return value
+        index = served.get(query, 0)
+        served[query] = index + 1
+        return value[min(index, len(value) - 1)]
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             parsed = urlparse(self.path)
@@ -87,7 +147,7 @@ def stub_prometheus(values: dict[str, float]):
             body = json.dumps(
                 {
                     "status": "success",
-                    "data": {"result": [{"value": [0, str(values[query])]}]},
+                    "data": {"result": [{"value": [0, str(next_value(query))]}]},
                 }
             ).encode()
             self.send_response(200)
@@ -136,7 +196,8 @@ def wrap(line: str) -> list[str]:
     )
 
 
-def render(path: Path, command: str, output: list[str], code: str) -> None:
+def render(path: Path, steps: list[tuple[str, list[str], str]]) -> None:
+    """Draw (command, output, exit code) steps, each followed by ``echo $?``."""
     font_path = next((p for p in FONT_PATHS if Path(p).exists()), None)
     if font_path is None:
         raise SystemExit("DejaVu Sans Mono not found; install fonts-dejavu")
@@ -144,10 +205,12 @@ def render(path: Path, command: str, output: list[str], code: str) -> None:
     char_w = font.getlength("M")
     line_h = int(FONT_SIZE * 1.5)
 
-    # (prompt?, text) rows: the command, its output, then `echo $?` and code.
-    rows = [(True, command)]
-    rows += [(False, part) for line in output for part in wrap(line)]
-    rows += [(True, "echo $?"), (False, code)]
+    # (prompt?, text) rows: each command, its output, then `echo $?` and code.
+    rows = []
+    for command, output, code in steps:
+        rows.append((True, command))
+        rows += [(False, part) for line in output for part in wrap(line)]
+        rows += [(True, "echo $?"), (False, code)]
 
     width = int(PAD_X * 2 + char_w * (COLUMNS + 2))
     height = TITLE_H + PAD_Y * 2 + line_h * len(rows)
@@ -171,13 +234,22 @@ def render(path: Path, command: str, output: list[str], code: str) -> None:
 
 
 def main() -> None:
+    if "--cluster" in sys.argv[1:]:
+        for name, commands, values in CLUSTER_SHOTS:
+            with stub_prometheus(values):
+                steps = [(command, *run(command)) for command in commands]
+            render(OUT_DIR / name, steps)
+            for command, _, code in steps:
+                print(f"{name}: $ {command} -> exit {code}")
+        return
+
     for name, command, values in SHOTS:
         if values is None:
             output, code = run(command)
         else:
             with stub_prometheus(values):
                 output, code = run(command)
-        render(OUT_DIR / name, command, output, code)
+        render(OUT_DIR / name, [(command, output, code)])
         print(f"{name}: $ {command} -> exit {code}")
 
 
