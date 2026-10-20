@@ -1,5 +1,7 @@
 # chaos-kit
 
+[![CI](https://github.com/tenalisriharsha/chaos-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/tenalisriharsha/chaos-kit/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A declarative chaos engineering toolkit for Kubernetes.
 
 Define resilience experiments in YAML — pod kills, CPU stress, network
@@ -42,33 +44,6 @@ The `run` views run against a real k3s cluster, set up as described in
 ![chaoskit run on a real cluster: examples/experiment.yaml stops at network_latency, no tc in nginx, exit 2](docs/screenshots/11-run-experiment-no-tc.png)
 
 </details>
-
-## Project Status
-
-**Feature-complete for the planned scope (phases 1-3).**
-See [PROGRESS.md](PROGRESS.md) for the vision, architecture and phased build
-plan.
-
-Current state: **Phase 3 complete** — experiment schema, steady-state
-verification against Prometheus, Kubernetes chaos injectors (`pod_kill`,
-`cpu_stress`, `network_latency`), an experiment runner, pass/fail
-resilience reports (text and JSON), and a CLI (`validate`, `check`,
-`run`). The suite covers every module, using a stub Prometheus and a fake
-Kubernetes client.
-
-`chaoskit run` has been run against one real cluster (single-node k3s, see
-[docs/real-cluster.md](docs/real-cluster.md) for exactly what was run):
-
-- **Verified:** `pod_kill` deletes the matching pod and the Deployment
-  replaces it; `cpu_stress` runs `stress-ng` in every matching pod at once
-  while the post-check runs; the pre/post steady-state checks, the abort
-  path, the text and JSON reports, and exit codes `0`/`1`/`2`; clear
-  errors when `stress-ng`, `tc`, `NET_ADMIN` or kernel netem support is
-  missing.
-- **Not verified:** `network_latency` actually adding and then removing
-  latency (that kernel has no netem); a real Prometheus (steady-state
-  values were stubbed); multi-node clusters, other runtimes, in-cluster
-  configuration and restricted RBAC.
 
 ## Experiment format
 
@@ -184,6 +159,33 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest
 ```
+
+## Status
+
+**Feature-complete for the planned scope (phases 1-3).**
+See [PROGRESS.md](PROGRESS.md) for the vision, architecture and phased build
+plan.
+
+Current state: **Phase 3 complete** — experiment schema, steady-state
+verification against Prometheus, Kubernetes chaos injectors (`pod_kill`,
+`cpu_stress`, `network_latency`), an experiment runner, pass/fail
+resilience reports (text and JSON), and a CLI (`validate`, `check`,
+`run`). The suite covers every module, using a stub Prometheus and a fake
+Kubernetes client.
+
+`chaoskit run` has been run against one real cluster (single-node k3s, see
+[docs/real-cluster.md](docs/real-cluster.md) for exactly what was run):
+
+- **Verified:** `pod_kill` deletes the matching pod and the Deployment
+  replaces it; `cpu_stress` runs `stress-ng` in every matching pod at once
+  while the post-check runs; the pre/post steady-state checks, the abort
+  path, the text and JSON reports, and exit codes `0`/`1`/`2`; clear
+  errors when `stress-ng`, `tc`, `NET_ADMIN` or kernel netem support is
+  missing.
+- **Not verified:** `network_latency` actually adding and then removing
+  latency (that kernel has no netem); a real Prometheus (steady-state
+  values were stubbed); multi-node clusters, other runtimes, in-cluster
+  configuration and restricted RBAC.
 
 ## License
 
