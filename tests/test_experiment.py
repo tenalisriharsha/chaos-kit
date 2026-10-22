@@ -182,3 +182,62 @@ def test_action_namespace_must_be_non_empty_string(namespace):
     data = {**VALID, "actions": [{"type": "pod_kill", "target": target}]}
     with pytest.raises(ExperimentError, match=r"actions\[0\]\.target\.namespace"):
         parse_experiment(data)
+
+
+def test_unknown_top_level_key_rejected():
+    data = {**VALID, "bogus": "whatever"}
+    with pytest.raises(ExperimentError, match=r"experiment: unknown key\(s\) \['bogus'\]"):
+        parse_experiment(data)
+
+
+def test_unknown_probe_key_rejected():
+    data = {
+        **VALID,
+        "steady_state": [
+            {
+                "name": "p",
+                "query": "up",
+                "operator": "lt",
+                "threshold": 1,
+                "unexpected": True,
+            }
+        ],
+    }
+    with pytest.raises(
+        ExperimentError, match=r"steady_state\[0\]: unknown key\(s\) \['unexpected'\]"
+    ):
+        parse_experiment(data)
+
+
+def test_unknown_target_key_rejected():
+    data = {
+        **VALID,
+        "actions": [
+            {
+                "type": "pod_kill",
+                "target": {"label_selector": "app=api", "region": "us-east-1"},
+            }
+        ],
+    }
+    with pytest.raises(
+        ExperimentError, match=r"actions\[0\]\.target: unknown key\(s\) \['region'\]"
+    ):
+        parse_experiment(data)
+
+
+def test_action_params_typo_rejected():
+    """A typo like 'parms' for 'params' must not silently drop the intended config."""
+    data = {
+        **VALID,
+        "actions": [
+            {
+                "type": "network_latency",
+                "target": {"namespace": "default", "label_selector": "app=api"},
+                "parms": {"latency_ms": 999, "duration": "999s"},
+            }
+        ],
+    }
+    with pytest.raises(
+        ExperimentError, match=r"actions\[0\]: unknown key\(s\) \['parms'\]"
+    ):
+        parse_experiment(data)

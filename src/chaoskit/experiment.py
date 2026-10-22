@@ -25,9 +25,22 @@ COMPARATORS = {
 
 SUPPORTED_ACTIONS = ("pod_kill", "cpu_stress", "network_latency")
 
+TOP_LEVEL_KEYS = {"name", "description", "steady_state", "actions"}
+PROBE_KEYS = {"name", "query", "operator", "threshold"}
+ACTION_KEYS = {"type", "target", "params"}
+TARGET_KEYS = {"namespace", "label_selector"}
+
 
 class ExperimentError(ValueError):
     """Raised when an experiment definition is missing or invalid."""
+
+
+def _check_unknown_keys(
+    item: dict, allowed: set[str], prefix: str, errors: list[str]
+) -> None:
+    extra = set(item) - allowed
+    if extra:
+        errors.append(f"{prefix}: unknown key(s) {sorted(extra)}")
 
 
 @dataclass(frozen=True)
@@ -90,6 +103,8 @@ def parse_experiment(data: Any) -> Experiment:
 
     errors: list[str] = []
 
+    _check_unknown_keys(data, TOP_LEVEL_KEYS, "experiment", errors)
+
     name = data.get("name")
     if not isinstance(name, str) or not name.strip():
         errors.append("'name' is required and must be a non-empty string")
@@ -124,6 +139,8 @@ def _parse_probes(raw: Any, errors: list[str]) -> list[SteadyStateProbe]:
         if not isinstance(item, dict):
             errors.append(f"{prefix}: must be a mapping")
             continue
+
+        _check_unknown_keys(item, PROBE_KEYS, prefix, errors)
 
         probe_name = item.get("name")
         query = item.get("query")
@@ -170,6 +187,8 @@ def _parse_actions(raw: Any, errors: list[str]) -> list[Action]:
             errors.append(f"{prefix}: must be a mapping")
             continue
 
+        _check_unknown_keys(item, ACTION_KEYS, prefix, errors)
+
         action_type = item.get("type")
         target = item.get("target")
         params = item.get("params", {})
@@ -183,16 +202,19 @@ def _parse_actions(raw: Any, errors: list[str]) -> list[Action]:
         if not isinstance(target, dict):
             errors.append(f"{prefix}.target: required mapping")
             ok = False
-        elif not isinstance(target.get("label_selector"), str) or not target.get(
-            "label_selector"
-        ).strip():
-            errors.append(f"{prefix}.target.label_selector: required non-empty string")
-            ok = False
-        elif "namespace" in target and (
-            not isinstance(target["namespace"], str) or not target["namespace"].strip()
-        ):
-            errors.append(f"{prefix}.target.namespace: must be a non-empty string")
-            ok = False
+        else:
+            _check_unknown_keys(target, TARGET_KEYS, f"{prefix}.target", errors)
+            if not isinstance(target.get("label_selector"), str) or not target.get(
+                "label_selector"
+            ).strip():
+                errors.append(f"{prefix}.target.label_selector: required non-empty string")
+                ok = False
+            elif "namespace" in target and (
+                not isinstance(target["namespace"], str)
+                or not target["namespace"].strip()
+            ):
+                errors.append(f"{prefix}.target.namespace: must be a non-empty string")
+                ok = False
         if not isinstance(params, dict):
             errors.append(f"{prefix}.params: must be a mapping")
             ok = False
