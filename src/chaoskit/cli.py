@@ -7,7 +7,6 @@ import math
 import sys
 
 from chaoskit.experiment import ExperimentError, load_experiment
-from chaoskit.injectors import InjectionError
 from chaoskit.injectors.kubernetes import KubernetesError
 from chaoskit import report
 from chaoskit.runner import run_experiment
@@ -158,7 +157,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     metrics = PrometheusClient(args.prometheus)
     try:
         result = run_experiment(exp, metrics, kubernetes, settle_seconds=args.settle)
-    except (SteadyStateError, InjectionError, KubernetesError) as exc:
+    except SteadyStateError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
@@ -167,6 +166,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     else:
         print(report.render_text(result))
 
+    if result.partial_failure:
+        print(f"ERROR: {result.injection_error}", file=sys.stderr)
+        return 3
     if result.passed:
         return 0
     return 1
