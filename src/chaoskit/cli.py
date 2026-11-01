@@ -160,6 +160,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     except SteadyStateError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print("\nINTERRUPTED: removed active faults from the target pods", file=sys.stderr)
+        return 130
 
     if args.json:
         print(report.render_json(result))

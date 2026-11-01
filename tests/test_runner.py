@@ -193,3 +193,77 @@ def test_aborted_run_has_no_recovery_time(k8s):
     assert result.duration_seconds == 1.0
     assert result.injection_finished_at is None
     assert result.recovery_seconds is None
+
+
+def _latency_experiment() -> object:
+    return parse_experiment(
+        {
+            "name": "latency",
+            "steady_state": [
+                {"name": "p", "query": "q", "operator": "lt", "threshold": 1}
+            ],
+            "actions": [
+                {
+                    "type": "network_latency",
+                    "target": {"namespace": "default", "label_selector": "app=api"},
+                }
+            ],
+        }
+    )
+
+
+def test_interrupt_during_settle_removes_injected_faults(k8s):
+    metrics = FakeMetricsClient([0.1])
+
+    def interrupt(_seconds):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_experiment(_latency_experiment(), metrics, k8s, sleep=interrupt)
+
+    # Both pods got the qdisc add exec, then a matching cleanup exec each.
+    assert len(k8s.execs) == 4
+    add_pods = {name for _, name, cmd in k8s.execs[:2]}
+    cleanup_execs = k8s.execs[2:]
+    assert {name for _, name, _ in cleanup_execs} == add_pods
+    for _, _, command in cleanup_execs:
+        assert "tc qdisc del" in " ".join(command)
+
+
+def test_interrupt_mid_injection_removes_faults_from_earlier_actions(k8s):
+    class InterruptingKubernetesClient(FakeKubernetesClient):
+        def delete_pod(self, namespace, name):
+            raise KeyboardInterrupt
+
+    exp = parse_experiment(
+        {
+            "name": "latency-then-kill",
+            "steady_state": [
+                {"name": "p", "query": "q", "operator": "lt", "threshold": 1}
+            ],
+            "actions": [
+                {
+                    "type": "network_latency",
+                    "target": {"namespace": "default", "label_selector": "app=api"},
+                },
+                {
+                    "type": "pod_kill",
+                    "target": {"namespace": "default", "label_selector": "app=api"},
+                },
+            ],
+        }
+    )
+    client = InterruptingKubernetesClient(
+        {("default", "app=api"): ["api-1", "api-2"]}
+    )
+    metrics = FakeMetricsClient([0.1])
+
+    with pytest.raises(KeyboardInterrupt):
+        run_experiment(exp, metrics, client, sleep=lambda s: None)
+
+    # The latency fault from action 1 is removed even though action 2
+    # (pod_kill) is the one that raised.
+    assert len(client.execs) == 4
+    cleanup_execs = client.execs[2:]
+    for _, _, command in cleanup_execs:
+        assert "tc qdisc del" in " ".join(command)

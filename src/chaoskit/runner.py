@@ -18,6 +18,19 @@ from chaoskit.injectors.kubernetes import KubernetesClient, KubernetesError
 from chaoskit.steadystate import MetricsClient, ProbeResult, verify_steady_state
 
 
+def _remove_active_faults(cleanups: list[Callable[[], None]]) -> None:
+    """Best-effort removal of every fault registered so far.
+
+    Runs on Ctrl-C: a cleanup failing (pod already gone, qdisc already
+    removed) must not stop the rest from running.
+    """
+    for cleanup in cleanups:
+        try:
+            cleanup()
+        except KubernetesError:
+            pass
+
+
 @dataclass(frozen=True)
 class InjectionRecord:
     """One injected action and its human-readable outcome."""
@@ -86,6 +99,10 @@ def run_experiment(
     If an action cannot be injected, the run stops there: the returned
     result carries every injection completed before the failure plus
     ``injection_error``, instead of raising.
+
+    If interrupted (``KeyboardInterrupt``), every fault injected so far is
+    removed before the interrupt propagates, instead of leaving it to run
+    out its duration in the pods.
     """
     pre_check = verify_steady_state(experiment.steady_state, metrics)
     result = RunResult(experiment=experiment, pre_check=pre_check, started_at=clock())
@@ -95,24 +112,30 @@ def run_experiment(
         result.finished_at = clock()
         return result
 
-    for action in experiment.actions:
-        try:
-            description = inject_action(action, kubernetes)
-        except (InjectionError, KubernetesError) as exc:
-            result.injection_error = str(exc)
-            result.finished_at = clock()
-            return result
-        result.injections.append(
-            InjectionRecord(
-                action_type=action.type,
-                target=f"{action.target['namespace']}/{action.target['label_selector']}",
-                description=description,
-                at=clock(),
+    active_faults: list[Callable[[], None]] = []
+    try:
+        for action in experiment.actions:
+            try:
+                description = inject_action(action, kubernetes, on_fault=active_faults.append)
+            except (InjectionError, KubernetesError) as exc:
+                result.injection_error = str(exc)
+                result.finished_at = clock()
+                return result
+            result.injections.append(
+                InjectionRecord(
+                    action_type=action.type,
+                    target=f"{action.target['namespace']}/{action.target['label_selector']}",
+                    description=description,
+                    at=clock(),
+                )
             )
-        )
 
-    result.injection_finished_at = clock()
-    sleep(settle_seconds)
+        result.injection_finished_at = clock()
+        sleep(settle_seconds)
+    except KeyboardInterrupt:
+        _remove_active_faults(active_faults)
+        raise
+
     result.post_check = verify_steady_state(experiment.steady_state, metrics)
     result.finished_at = clock()
     return result
