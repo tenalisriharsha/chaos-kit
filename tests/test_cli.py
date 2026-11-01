@@ -125,6 +125,52 @@ def test_run_fails_when_system_does_not_recover(
     assert fake_k8s.deleted == [("default", "api-1")]
 
 
+MULTI_ACTION_YAML = textwrap.dedent(
+    """\
+    name: cli-multi
+    description: demo
+    steady_state:
+      - name: errors
+        query: rate(errors[5m])
+        operator: lt
+        threshold: 0.01
+    actions:
+      - type: pod_kill
+        target:
+          namespace: default
+          label_selector: app=api
+        params:
+          count: 1
+      - type: cpu_stress
+        target:
+          namespace: default
+          label_selector: app=missing
+      - type: pod_kill
+        target:
+          namespace: default
+          label_selector: app=api
+    """
+)
+
+
+def test_run_reports_earlier_injections_when_a_later_action_fails(
+    tmp_path, prometheus, fake_k8s, capsys
+):
+    """action 2 of 3 fails: the report must still name action 1's effects."""
+    path = tmp_path / "multi.yaml"
+    path.write_text(MULTI_ACTION_YAML)
+    prometheus.respond_value(0.001)  # pre-check passes, so injection is attempted
+
+    rc = main(["run", str(path), "--prometheus", prometheus.url, "--settle", "0"])
+
+    assert rc == 3
+    out, err = capsys.readouterr()
+    assert "Injected chaos" in out
+    assert "deleted 1 pod(s): api-1" in out
+    assert "no pods found matching 'app=missing'" in err
+    assert fake_k8s.deleted == [("default", "api-1")]
+
+
 def test_run_json_report(experiment_file, prometheus, fake_k8s, capsys):
     import json
 
@@ -209,10 +255,11 @@ def test_run_kubernetes_unreachable(experiment_file, prometheus, monkeypatch, ca
     rc = main(
         ["run", str(experiment_file), "--prometheus", prometheus.url, "--settle", "0"]
     )
-    assert rc == 2
-    err = capsys.readouterr().err
+    assert rc == 3
+    out, err = capsys.readouterr()
     assert "ERROR" in err
     assert "Traceback" not in err
+    assert "Injected chaos" in out
 
 
 def test_check_non_json_prometheus_response(experiment_file, prometheus, capsys):

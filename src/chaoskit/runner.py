@@ -13,8 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from chaoskit.experiment import Experiment
-from chaoskit.injectors import inject_action
-from chaoskit.injectors.kubernetes import KubernetesClient
+from chaoskit.injectors import InjectionError, inject_action
+from chaoskit.injectors.kubernetes import KubernetesClient, KubernetesError
 from chaoskit.steadystate import MetricsClient, ProbeResult, verify_steady_state
 
 
@@ -40,6 +40,7 @@ class RunResult:
     aborted: bool = False
     injection_finished_at: float | None = None
     finished_at: float | None = None
+    injection_error: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -49,6 +50,11 @@ class RunResult:
             and self.post_check is not None
             and all(r.passed for r in self.post_check)
         )
+
+    @property
+    def partial_failure(self) -> bool:
+        """True when an action failed partway through injection."""
+        return self.injection_error is not None
 
     @property
     def duration_seconds(self) -> float | None:
@@ -77,7 +83,9 @@ def run_experiment(
 
     ``sleep`` is injectable so tests can skip the settle window; ``clock`` is
     injectable so tests can control the timestamps on the result.
-    Raises ``InjectionError`` if an action cannot be injected.
+    If an action cannot be injected, the run stops there: the returned
+    result carries every injection completed before the failure plus
+    ``injection_error``, instead of raising.
     """
     pre_check = verify_steady_state(experiment.steady_state, metrics)
     result = RunResult(experiment=experiment, pre_check=pre_check, started_at=clock())
@@ -88,7 +96,12 @@ def run_experiment(
         return result
 
     for action in experiment.actions:
-        description = inject_action(action, kubernetes)
+        try:
+            description = inject_action(action, kubernetes)
+        except (InjectionError, KubernetesError) as exc:
+            result.injection_error = str(exc)
+            result.finished_at = clock()
+            return result
         result.injections.append(
             InjectionRecord(
                 action_type=action.type,

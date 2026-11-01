@@ -3,7 +3,6 @@
 import pytest
 
 from chaoskit.experiment import parse_experiment
-from chaoskit.injectors import InjectionError
 from chaoskit.runner import run_experiment
 
 from fakes import FakeKubernetesClient
@@ -117,12 +116,55 @@ def test_runs_actions_in_order(k8s):
     assert [name for _, name, _ in k8s.execs] == ["api-2"]
 
 
-def test_injection_error_propagates():
+def test_injection_error_is_recorded_not_raised():
     metrics = FakeMetricsClient([0.1])
-    with pytest.raises(InjectionError, match="no pods found"):
-        run_experiment(
-            _experiment(), metrics, FakeKubernetesClient(), sleep=lambda s: None
-        )
+    result = run_experiment(
+        _experiment(), metrics, FakeKubernetesClient(), sleep=lambda s: None
+    )
+
+    assert result.partial_failure
+    assert "no pods found" in result.injection_error
+    assert not result.passed
+    assert result.injections == []
+    assert result.post_check is None
+
+
+def test_later_action_failure_reports_earlier_injections(k8s):
+    exp = parse_experiment(
+        {
+            "name": "multi",
+            "steady_state": [
+                {"name": "p", "query": "q", "operator": "lt", "threshold": 1}
+            ],
+            "actions": [
+                {
+                    "type": "pod_kill",
+                    "target": {"namespace": "default", "label_selector": "app=api"},
+                    "params": {"count": 1},
+                },
+                {
+                    "type": "cpu_stress",
+                    "target": {"namespace": "default", "label_selector": "app=missing"},
+                },
+                {
+                    "type": "pod_kill",
+                    "target": {"namespace": "default", "label_selector": "app=api"},
+                },
+            ],
+        }
+    )
+    metrics = FakeMetricsClient([0.1])
+    result = run_experiment(exp, metrics, k8s, sleep=lambda s: None)
+
+    assert result.partial_failure
+    assert "no pods found matching 'app=missing'" in result.injection_error
+    # action 1's effect is reported even though action 2 failed and action 3 never ran
+    assert len(result.injections) == 1
+    assert result.injections[0].action_type == "pod_kill"
+    assert result.injections[0].description == "deleted 1 pod(s): api-1"
+    assert k8s.deleted == [("default", "api-1")]
+    assert result.post_check is None
+    assert not result.passed
 
 
 def test_records_wall_clock_timestamps(k8s):

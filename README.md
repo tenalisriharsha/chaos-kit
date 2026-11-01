@@ -125,10 +125,25 @@ Post-injection steady state:
 Verdict: experiment PASSED
 ```
 
+If an action fails partway through injection, the report still lists
+every action that completed first, so an operator mid-incident can see
+what chaos-kit already changed (here, the pod kill) before the action
+that failed (here, `network_latency`):
+
+```
+Injected chaos:
+  - pod_kill -> default/app=api: deleted 1 pod(s): api-6d9f8c7b5-x2abc (at 2026-08-11T08:07:18Z)
+
+Injection failed: no pods found matching 'app=api' in namespace 'default'
+
+Verdict: experiment PARTIAL FAILURE (injection failed: no pods found matching 'app=api' in namespace 'default')
+```
+
 With `--json` the same report is emitted as machine-readable JSON
 (verdict, probe values, injections, and timings) for CI pipelines and
 dashboards. Exit codes: `0` passed, `1` failed or aborted, `2`
-setup/validation error.
+setup/validation error, `3` an action failed partway through injection
+(the report above is still printed, before the `ERROR` line).
 
 ## Chaos actions
 

@@ -29,12 +29,16 @@ def _seconds(value: float | None) -> str:
 def _verdict(result: RunResult) -> str:
     if result.aborted:
         return "aborted"
+    if result.partial_failure:
+        return "partial_failure"
     return "passed" if result.passed else "failed"
 
 
 def _verdict_line(result: RunResult) -> str:
     if result.aborted:
         return "experiment ABORTED (steady state violated before injection)"
+    if result.partial_failure:
+        return f"experiment PARTIAL FAILURE (injection failed: {result.injection_error})"
     if result.passed:
         return "experiment PASSED"
     return "experiment FAILED (steady state violated after injection)"
@@ -77,9 +81,14 @@ def render_text(result: RunResult) -> str:
                 f"  - {record.action_type} -> {record.target}: "
                 f"{record.description} (at {_iso(record.at)})"
             )
+        if not result.injections:
+            lines.append("  (none)")
         lines.append("")
-        lines.append("Post-injection steady state:")
-        lines.extend(_probe_line(r) for r in result.post_check or [])
+        if result.partial_failure:
+            lines.append(f"Injection failed: {result.injection_error}")
+        else:
+            lines.append("Post-injection steady state:")
+            lines.extend(_probe_line(r) for r in result.post_check or [])
 
     lines.append("")
     lines.append(f"Verdict: {_verdict_line(result)}")
@@ -114,6 +123,7 @@ def report_dict(result: RunResult) -> dict:
             }
             for record in result.injections
         ],
+        "injection_error": result.injection_error,
     }
 
 

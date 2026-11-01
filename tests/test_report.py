@@ -100,6 +100,24 @@ def test_text_report_aborted(k8s):
     assert "recovery: -" in text
 
 
+def test_text_report_partial_failure(k8s):
+    ticks = iter([100.0, 110.0, 120.0])
+    result = run_experiment(
+        _experiment(),
+        FakeMetricsClient([0.1]),
+        FakeKubernetesClient(),  # no pods for app=api, so injection fails
+        sleep=lambda s: None,
+        clock=lambda: next(ticks),
+    )
+    text = render_text(result)
+
+    assert "Injected chaos:" in text
+    assert "  (none)" in text
+    assert "Injection failed: no pods found matching 'app=api'" in text
+    assert "Post-injection steady state:" not in text
+    assert "experiment PARTIAL FAILURE" in text
+
+
 def test_json_report_structure(k8s):
     result = _run([0.1, 0.2], k8s)
     data = json.loads(render_json(result))
@@ -148,6 +166,24 @@ def test_json_report_aborted_has_null_post_check(k8s):
     assert data["steady_state"]["post"] is None
     assert data["injections"] == []
     assert data["recovery_seconds"] is None
+
+
+def test_json_report_partial_failure():
+    ticks = iter([100.0, 110.0, 120.0])
+    result = run_experiment(
+        _experiment(),
+        FakeMetricsClient([0.1]),
+        FakeKubernetesClient(),
+        sleep=lambda s: None,
+        clock=lambda: next(ticks),
+    )
+    data = json.loads(render_json(result))
+
+    assert data["verdict"] == "partial_failure"
+    assert data["passed"] is False
+    assert data["injections"] == []
+    assert data["injection_error"] == "no pods found matching 'app=api' in namespace 'default'"
+    assert data["steady_state"]["post"] is None
 
 
 def test_report_dict_on_empty_result():

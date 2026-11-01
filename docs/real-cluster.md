@@ -315,17 +315,20 @@ Each of these was seen on the cluster first; each fix has a test.
    after all stress had ended. `stress-ng` is now started detached, after
    a foreground check that it exists.
 
+5. **A failing action hid the actions already injected, and reused exit
+   code `2`.** When an action failed part-way through a run, chaos-kit
+   printed only the `ERROR` line and exited `2` (the same code as a
+   setup/validation error); the pods already deleted by an earlier
+   `pod_kill` went unreported (preview `11`: a pod was deleted and
+   replaced, but the output said nothing about it). The run now prints
+   the full report, listing every injection that completed before the
+   failing action, before the `ERROR` line, and exits `3`. The
+   screenshots above (`10`, `11`) predate this fix and still show the
+   old exit `2` behavior; they were not regenerated because this
+   environment has no real cluster to run them against.
+
 ## Problems found but not fixed
 
-- **A failing action hides the actions already injected.** When an action
-  fails part-way through a run, chaos-kit prints only the `ERROR` line and
-  exits `2`; no report is printed, so the pods already deleted by an
-  earlier `pod_kill` go unreported (preview `11`: a pod was deleted and
-  replaced, but the output says nothing about it). Changing this would
-  change the runner's result model, which was out of scope.
-- **Exit code `2` for a failed injection.** The README describes `2` as a
-  setup/validation error, but it is also what a run that failed after
-  injecting chaos returns.
 - **Zombie `stress-ng` processes in some images.** The detached
   `stress-ng` is reparented to the container's PID 1. In the `cache` pods
   PID 1 is `sleep infinity`, which never reaps children, so after the
