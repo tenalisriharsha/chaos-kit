@@ -140,9 +140,12 @@ class TestNetworkLatency:
         inject_network_latency(_action("network_latency"), k8s)
         assert len(k8s.execs) == 3
         command = " ".join(k8s.execs[0][2])
-        assert "tc qdisc add dev eth0 root netem delay 100ms" in command
+        # No interface is given, so the script resolves the pod's
+        # default-route device at run time instead of assuming eth0.
+        assert "ip route show default" in command
+        assert 'tc qdisc add dev "$iface" root netem delay 100ms' in command
         assert "sleep 30" in command
-        assert "tc qdisc del dev eth0 root netem delay 100ms" in command
+        assert 'tc qdisc del dev "$iface" root netem delay 100ms' in command
 
     def test_honors_latency_and_duration_params(self, k8s):
         inject_network_latency(
@@ -152,9 +155,22 @@ class TestNetworkLatency:
         assert "delay 250ms" in command
         assert "sleep 60" in command
 
+    def test_honors_explicit_interface_param(self, k8s):
+        inject_network_latency(_action("network_latency", interface="eth1"), k8s)
+        command = " ".join(k8s.execs[0][2])
+        assert "iface=eth1" in command
+        assert "ip route show default" not in command
+        assert 'tc qdisc add dev "$iface" root netem delay 100ms' in command
+
     def test_invalid_latency_raises(self, k8s):
         with pytest.raises(InjectionError, match="latency_ms"):
             inject_network_latency(_action("network_latency", latency_ms=0), k8s)
+
+    def test_invalid_interface_raises(self, k8s):
+        with pytest.raises(InjectionError, match="interface"):
+            inject_network_latency(
+                _action("network_latency", interface="eth0; rm -rf /"), k8s
+            )
 
     def test_tc_failure_fails_the_exec(self, k8s, tmp_path):
         # Seen on a real cluster: a kernel without netem made tc fail, but
@@ -163,19 +179,53 @@ class TestNetworkLatency:
         bin_dir = _fake_bin(
             tmp_path, "tc", "echo 'Error: Specified qdisc kind is unknown.' >&2; exit 2"
         )
+        _fake_bin(tmp_path, "ip", 'echo "default via 10.0.0.1 dev veth0"')
         inject_network_latency(_action("network_latency"), k8s)
         proc = _run_in_pod_shell(k8s.execs[0][2], bin_dir)
         assert proc.returncode == 2
         assert "qdisc kind is unknown" in proc.stderr
 
+    def test_missing_default_route_fails_the_exec(self, k8s, tmp_path):
+        bin_dir = _fake_bin(tmp_path, "ip", "true")  # prints nothing
+        inject_network_latency(_action("network_latency"), k8s)
+        proc = _run_in_pod_shell(k8s.execs[0][2], bin_dir)
+        assert proc.returncode == 1
+        assert "could not detect the default-route interface" in proc.stderr
+
     def test_adds_qdisc_now_and_removes_it_after_duration(self, k8s, tmp_path):
         log = tmp_path / "tc.log"
         bin_dir = _fake_bin(tmp_path, "tc", f'echo "$*" >> {log}')
+        _fake_bin(tmp_path, "ip", 'echo "default via 10.0.0.1 dev veth0"')
         inject_network_latency(_action("network_latency", duration=1), k8s)
         proc = _run_in_pod_shell(k8s.execs[0][2], bin_dir)
         assert proc.returncode == 0
-        assert log.read_text() == "qdisc add dev eth0 root netem delay 100ms\n"
+        assert log.read_text() == "qdisc add dev veth0 root netem delay 100ms\n"
         assert _wait_for(lambda: "qdisc del" in log.read_text())
+        assert log.read_text() == (
+            "qdisc add dev veth0 root netem delay 100ms\n"
+            "qdisc del dev veth0 root netem delay 100ms\n"
+        )
+
+    def test_registers_a_cleanup_per_pod_for_on_fault(self, k8s):
+        cleanups = []
+        inject_network_latency(_action("network_latency"), k8s, on_fault=cleanups.append)
+        assert len(cleanups) == 3
+        cleanups[0]()
+        assert len(k8s.execs) == 4
+        command = " ".join(k8s.execs[-1][2])
+        assert k8s.execs[-1][:2] == ("default", "api-1")
+        assert "ip route show default" in command
+        assert 'tc qdisc del dev "$iface" root netem delay 100ms' in command
+
+    def test_on_fault_cleanup_uses_explicit_interface(self, k8s):
+        cleanups = []
+        inject_network_latency(
+            _action("network_latency", interface="eth1"), k8s, on_fault=cleanups.append
+        )
+        cleanups[0]()
+        command = " ".join(k8s.execs[-1][2])
+        assert "iface=eth1" in command
+        assert "ip route show default" not in command
 
 
 class TestDispatch:

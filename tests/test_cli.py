@@ -171,6 +171,23 @@ def test_run_reports_earlier_injections_when_a_later_action_fails(
     assert fake_k8s.deleted == [("default", "api-1")]
 
 
+def test_run_interrupted_exits_130(experiment_file, prometheus, fake_k8s, monkeypatch, capsys):
+    import chaoskit.cli
+
+    def raise_interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(chaoskit.cli, "run_experiment", raise_interrupt)
+    prometheus.respond_value(0.001)
+
+    rc = main(
+        ["run", str(experiment_file), "--prometheus", prometheus.url, "--settle", "0"]
+    )
+
+    assert rc == 130
+    assert "INTERRUPTED" in capsys.readouterr().err
+
+
 def test_run_json_report(experiment_file, prometheus, fake_k8s, capsys):
     import json
 
