@@ -333,16 +333,40 @@ Each of these was seen on the cluster first; each fix has a test.
   `stress-ng` is reparented to the container's PID 1. In the `cache` pods
   PID 1 is `sleep infinity`, which never reaps children, so after the
   60s a defunct `[stress-ng]` entry stays in the process table (no CPU
-  used). Images whose PID 1 reaps children are not affected.
-- **network_latency assumes the interface is `eth0`.** True for the pods
-  here; not checked on other CNIs.
-- **Detached faults outlive chaos-kit.** If a run is interrupted, the
-  detached `stress-ng` or `sleep; tc qdisc del` keeps running in the pods
-  until its duration ends; chaos-kit cannot cancel it.
+  used). Images whose PID 1 reaps children are not affected; this is a
+  property of the image's init process, not something chaos-kit can fix
+  from the exec it runs.
+
+Fixed since this review (issue #5): `network_latency` assumed the
+interface was `eth0`, and an interrupted run left detached faults
+running in the pods until their duration ended.
+
+- `network_latency` now targets `params.interface` when given, otherwise
+  the device of the pod's default route (`ip route show default`),
+  resolved inside the pod instead of assumed by chaos-kit.
+- `chaoskit run` now registers each `network_latency` fault as it is
+  injected. On Ctrl-C it removes the qdisc from every pod it added it to
+  before exiting (`tc qdisc del`, best-effort per pod), instead of
+  leaving it to run out `duration`, and exits `130`.
+
+This could not be re-verified against *this* cluster, since its kernel
+has no netem (see above); it is covered by unit tests
+(`tests/test_injectors.py::TestNetworkLatency`, `tests/test_runner.py`)
+that run the generated shell script against fake `ip`/`tc` binaries. To
+check manually against a real cluster with netem support:
+
+```bash
+kubectl -n payments exec <payments pod> -- tc qdisc show
+chaoskit run examples/network-latency.yaml --prometheus <url> &
+sleep 2 && kill -INT %1   # Ctrl-C equivalent
+wait
+kubectl -n payments exec <payments pod> -- tc qdisc show   # back to "noqueue"
+```
 
 ## Not verified
 
-- `network_latency` actually adding latency and removing it afterwards
+- `network_latency` actually adding latency and removing it afterwards,
+  including the auto-detected interface and the Ctrl-C cleanup path
   (no netem in this kernel, see above).
 - A real Prometheus, and probes that react to the injected fault: every
   steady-state value came from a stub.

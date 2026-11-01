@@ -143,7 +143,8 @@ With `--json` the same report is emitted as machine-readable JSON
 (verdict, probe values, injections, and timings) for CI pipelines and
 dashboards. Exit codes: `0` passed, `1` failed or aborted, `2`
 setup/validation error, `3` an action failed partway through injection
-(the report above is still printed, before the `ERROR` line).
+(the report above is still printed, before the `ERROR` line), `130` the
+run was interrupted (Ctrl-C).
 
 ## Chaos actions
 
@@ -151,7 +152,7 @@ setup/validation error, `3` an action failed partway through injection
 | --- | --- | --- |
 | `pod_kill` | Deletes pods matching the target selector | `count` (1) |
 | `cpu_stress` | Runs `stress-ng` inside matching pods | `cores` (1), `duration` (30s) |
-| `network_latency` | Adds egress latency via `tc`/netem, self-cleaning | `latency_ms` (100), `duration` (30s) |
+| `network_latency` | Adds egress latency via `tc`/netem, self-cleaning | `latency_ms` (100), `duration` (30s), `interface` (auto-detected) |
 
 Actions target pods via `target.namespace` and `target.label_selector`.
 `cpu_stress` needs `sh` and `stress-ng` in the container image;
@@ -161,6 +162,13 @@ run stops with an `ERROR` naming the pod and the command's output, and
 exits `2`. Both run detached in the pods and end on their own after
 `duration`. Only pods that are `Running` and not terminating are
 targeted.
+
+`network_latency` applies to the device of the pod's default route
+(via `ip route show default`) unless `params.interface` names one
+explicitly; it no longer assumes `eth0`. If `chaoskit run` is interrupted
+(Ctrl-C) while a `network_latency` fault is active, it removes the qdisc
+from every pod it added it to before exiting, instead of waiting out
+`duration`; the run then exits `130`.
 
 `chaoskit run` requires a kubeconfig (or in-cluster config) and the optional
 `kubernetes` Python package (`pip install kubernetes`). It verifies the
