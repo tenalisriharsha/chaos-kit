@@ -64,6 +64,23 @@ def test_prometheus_client_empty_result(prometheus):
         client.query("up")
 
 
+def test_prometheus_client_multiple_series(prometheus):
+    prometheus.respond(
+        {
+            "status": "success",
+            "data": {
+                "result": [
+                    {"metric": {"pod": "api-1"}, "value": [0, "0.001"]},
+                    {"metric": {"pod": "api-2"}, "value": [0, "0.9"]},
+                ]
+            },
+        }
+    )
+    client = PrometheusClient(prometheus.url)
+    with pytest.raises(SteadyStateError, match="2 series"):
+        client.query("rate(http_requests_total{status=~\"5..\"}[5m])")
+
+
 def test_prometheus_client_error_status(prometheus):
     prometheus.respond({"status": "error", "error": "parse error"})
     client = PrometheusClient(prometheus.url)

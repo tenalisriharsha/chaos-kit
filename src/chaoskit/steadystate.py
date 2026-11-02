@@ -53,6 +53,11 @@ class PrometheusClient:
         result = payload.get("data", {}).get("result", [])
         if not result:
             raise SteadyStateError(f"query returned no data: {promql!r}")
+        if len(result) > 1:
+            raise SteadyStateError(
+                f"query {promql!r} returned {len(result)} series, expected exactly one; "
+                "aggregate it to a single series (e.g. with sum(...) or max(...))"
+            )
         try:
             return float(result[0]["value"][1])
         except (IndexError, KeyError, TypeError, ValueError) as exc:
