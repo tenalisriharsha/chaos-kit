@@ -241,3 +241,45 @@ def test_action_params_typo_rejected():
         ExperimentError, match=r"actions\[0\]: unknown key\(s\) \['parms'\]"
     ):
         parse_experiment(data)
+
+
+def test_unknown_action_params_key_rejected():
+    """A typo like 'duratoin' must not silently fall back to the injector default."""
+    data = {
+        **VALID,
+        "actions": [
+            {
+                "type": "network_latency",
+                "target": {"namespace": "default", "label_selector": "app=api"},
+                "params": {"latency_mss": 500, "duratoin": 60},
+            }
+        ],
+    }
+    with pytest.raises(
+        ExperimentError,
+        match=r"actions\[0\]\.params: unknown key\(s\) \['duratoin', 'latency_mss'\]",
+    ):
+        parse_experiment(data)
+
+
+@pytest.mark.parametrize(
+    ("action_type", "params"),
+    [
+        ("pod_kill", {"count": 2}),
+        ("cpu_stress", {"cores": 2, "duration": 60}),
+        ("network_latency", {"latency_ms": 200, "duration": "30s", "interface": "eth1"}),
+    ],
+)
+def test_action_params_correctly_spelled_accepted(action_type, params):
+    data = {
+        **VALID,
+        "actions": [
+            {
+                "type": action_type,
+                "target": {"namespace": "default", "label_selector": "app=api"},
+                "params": params,
+            }
+        ],
+    }
+    exp = parse_experiment(data)
+    assert exp.actions[0].params == params
