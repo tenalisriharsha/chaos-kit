@@ -29,6 +29,11 @@ TOP_LEVEL_KEYS = {"name", "description", "steady_state", "actions"}
 PROBE_KEYS = {"name", "query", "operator", "threshold"}
 ACTION_KEYS = {"type", "target", "params"}
 TARGET_KEYS = {"namespace", "label_selector"}
+ACTION_PARAM_KEYS = {
+    "pod_kill": {"count"},
+    "cpu_stress": {"cores", "duration"},
+    "network_latency": {"latency_ms", "duration", "interface"},
+}
 
 
 class ExperimentError(ValueError):
@@ -218,6 +223,10 @@ def _parse_actions(raw: Any, errors: list[str]) -> list[Action]:
         if not isinstance(params, dict):
             errors.append(f"{prefix}.params: must be a mapping")
             ok = False
+        elif action_type in ACTION_PARAM_KEYS:
+            _check_unknown_keys(
+                params, ACTION_PARAM_KEYS[action_type], f"{prefix}.params", errors
+            )
 
         if ok:
             target = dict(target)
