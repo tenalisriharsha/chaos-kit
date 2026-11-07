@@ -8,6 +8,7 @@ to inject into a Kubernetes cluster.
 from __future__ import annotations
 
 import operator
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,12 @@ ACTION_PARAM_KEYS = {
     "network_latency": {"latency_ms", "duration", "interface"},
 }
 
+# Mirrors the checks chaoskit.injectors._int_param/_duration_seconds/
+# _interface_param enforce at injection time, so validate catches a bad
+# param value before a run starts instead of mid-experiment.
+_POSITIVE_INT_PARAM_KEYS = {"count", "cores", "latency_ms"}
+_INTERFACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._-]*$")
+
 
 class ExperimentError(ValueError):
     """Raised when an experiment definition is missing or invalid."""
@@ -46,6 +53,40 @@ def _check_unknown_keys(
     extra = set(item) - allowed
     if extra:
         errors.append(f"{prefix}: unknown key(s) {sorted(extra)}")
+
+
+def _is_valid_duration(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value >= 1
+    if isinstance(value, str) and value.endswith("s") and value[:-1].isdigit():
+        return int(value[:-1]) >= 1
+    if isinstance(value, str) and value.isdigit():
+        return int(value) >= 1
+    return False
+
+
+def _check_action_param_values(
+    params: dict, prefix: str, errors: list[str]
+) -> None:
+    for key in _POSITIVE_INT_PARAM_KEYS & set(params):
+        value = params[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            errors.append(f"{prefix}.{key}: must be a positive integer, got {value!r}")
+
+    if "duration" in params and not _is_valid_duration(params["duration"]):
+        errors.append(
+            f"{prefix}.duration: must be seconds or '<n>s', got {params['duration']!r}"
+        )
+
+    if "interface" in params:
+        value = params["interface"]
+        if not isinstance(value, str) or not _INTERFACE_RE.match(value):
+            errors.append(
+                f"{prefix}.interface: must be a valid network interface name, "
+                f"got {value!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -224,9 +265,13 @@ def _parse_actions(raw: Any, errors: list[str]) -> list[Action]:
             errors.append(f"{prefix}.params: must be a mapping")
             ok = False
         elif action_type in ACTION_PARAM_KEYS:
+            errors_before = len(errors)
             _check_unknown_keys(
                 params, ACTION_PARAM_KEYS[action_type], f"{prefix}.params", errors
             )
+            _check_action_param_values(params, f"{prefix}.params", errors)
+            if len(errors) > errors_before:
+                ok = False
 
         if ok:
             target = dict(target)
