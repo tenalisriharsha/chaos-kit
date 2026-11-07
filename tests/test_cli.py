@@ -49,6 +49,39 @@ def test_validate_missing_file(tmp_path, capsys):
     assert "not found" in capsys.readouterr().err
 
 
+def test_validate_rejects_wrong_typed_action_param(tmp_path, capsys):
+    """A param type/range error must fail `validate`, not just `run`.
+
+    Previously `count: "abc"` passed validate as OK and only surfaced as
+    an InjectionError once `run` actually tried to inject the action.
+    """
+    path = tmp_path / "bad-params.yaml"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            name: bad-params-test
+            description: test
+            steady_state:
+              - name: low-error-rate
+                query: rate(http_requests_total{status=~"5.."}[5m])
+                operator: lt
+                threshold: 0.01
+            actions:
+              - type: pod_kill
+                target:
+                  namespace: default
+                  label_selector: app=api
+                params:
+                  count: "abc"
+            """
+        )
+    )
+    assert main(["validate", str(path)]) == 2
+    err = capsys.readouterr().err
+    assert "INVALID" in err
+    assert "params.count" in err
+
+
 def test_check_pass(experiment_file, prometheus, capsys):
     prometheus.respond_value(0.001)
     rc = main(["check", str(experiment_file), "--prometheus", prometheus.url])
