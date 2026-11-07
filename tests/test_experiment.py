@@ -283,3 +283,47 @@ def test_action_params_correctly_spelled_accepted(action_type, params):
     }
     exp = parse_experiment(data)
     assert exp.actions[0].params == params
+
+
+@pytest.mark.parametrize(
+    ("action_type", "params"),
+    [
+        # Wrong type: a string where an int is required.
+        ("pod_kill", {"count": "abc"}),
+        ("cpu_stress", {"cores": "two"}),
+        ("network_latency", {"latency_ms": "lots"}),
+        # Out of range: zero/negative where a positive integer is required.
+        ("pod_kill", {"count": -1}),
+        ("pod_kill", {"count": 0}),
+        ("cpu_stress", {"cores": -2}),
+        # Non-numeric, non-'<n>s' duration.
+        ("cpu_stress", {"duration": "soon"}),
+        ("network_latency", {"duration": "soon"}),
+        # Duration below the 1-second floor enforced at injection time.
+        ("cpu_stress", {"duration": 0}),
+        ("cpu_stress", {"duration": "-5s"}),
+        # Interface name that doesn't match the injector's allowed pattern.
+        ("network_latency", {"interface": "eth0; rm -rf /"}),
+        ("network_latency", {"interface": ""}),
+    ],
+)
+def test_action_params_wrong_type_or_range_rejected(action_type, params):
+    """validate must catch bad param values, not just bad param keys.
+
+    These are the same checks `_int_param`/`_duration_seconds`/
+    `_interface_param` already enforce at injection time; validate should
+    report them before a run starts instead of letting `run` discover them
+    mid-experiment, after earlier actions may have already injected chaos.
+    """
+    data = {
+        **VALID,
+        "actions": [
+            {
+                "type": action_type,
+                "target": {"namespace": "default", "label_selector": "app=api"},
+                "params": params,
+            }
+        ],
+    }
+    with pytest.raises(ExperimentError, match=r"actions\[0\]\.params\."):
+        parse_experiment(data)
