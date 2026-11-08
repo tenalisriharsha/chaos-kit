@@ -8,6 +8,7 @@ when all probes pass.
 from __future__ import annotations
 
 import json
+import math
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -59,11 +60,17 @@ class PrometheusClient:
                 "aggregate it to a single series (e.g. with sum(...) or max(...))"
             )
         try:
-            return float(result[0]["value"][1])
+            value = float(result[0]["value"][1])
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise SteadyStateError(
                 f"unexpected prometheus result shape: {result[0]!r}"
             ) from exc
+        if not math.isfinite(value):
+            raise SteadyStateError(
+                f"query {promql!r} returned a non-finite value ({value!r}); "
+                "the probe's series has no usable data for this query"
+            )
+        return value
 
 
 @dataclass(frozen=True)
