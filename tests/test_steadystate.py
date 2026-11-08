@@ -107,3 +107,18 @@ def test_prometheus_client_non_object_json_response(prometheus):
     client = PrometheusClient(prometheus.url)
     with pytest.raises(SteadyStateError, match="error"):
         client.query("up")
+
+
+@pytest.mark.parametrize("raw_value", ["NaN", "+Inf", "-Inf"])
+def test_prometheus_client_rejects_non_finite_values(prometheus, raw_value):
+    # Prometheus legitimately returns these strings, e.g. histogram_quantile
+    # over an empty bucket or a 0/0 ratio. json's float() parses them without
+    # complaint, so the client must reject them explicitly instead of handing
+    # back a non-finite float that later breaks --json output.
+    prometheus.respond(
+        {"status": "success", "data": {"result": [{"value": [0, raw_value]}]}}
+    )
+    client = PrometheusClient(prometheus.url)
+    with pytest.raises(SteadyStateError) as exc_info:
+        client.query("rate(errors[5m])")
+    assert "rate(errors[5m])" in str(exc_info.value)
