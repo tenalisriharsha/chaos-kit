@@ -318,6 +318,25 @@ def test_check_non_json_prometheus_response(experiment_file, prometheus, capsys)
     assert "ERROR: prometheus returned a non-JSON response" in capsys.readouterr().err
 
 
+def test_check_nan_prometheus_value_is_an_error_not_a_pass_or_fail(
+    experiment_file, prometheus, capsys
+):
+    # histogram_quantile over an empty bucket, or a 0/0 rate ratio, makes
+    # Prometheus legitimately return the string "NaN". chaoskit must report
+    # that as an ERROR, not silently evaluate the probe against nan and
+    # print a PASS/FAIL as if it were a real measurement.
+    prometheus.respond(
+        {"status": "success", "data": {"result": [{"value": [0, "NaN"]}]}}
+    )
+    rc = main(["check", str(experiment_file), "--prometheus", prometheus.url])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ERROR" in captured.err
+    assert "value=nan" not in captured.out
+    assert "PASS" not in captured.out
+    assert "FAIL" not in captured.out
+
+
 def test_validate_undecodable_file(tmp_path, capsys):
     path = tmp_path / "binary.yaml"
     path.write_bytes(b"\xff\xfe\x00not utf-8")
