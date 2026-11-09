@@ -230,6 +230,35 @@ def test_interrupt_during_settle_removes_injected_faults(k8s):
         assert "tc qdisc del" in " ".join(command)
 
 
+def test_interrupt_during_post_check_removes_injected_faults(k8s):
+    """A Ctrl-C while blocked on the final verify_steady_state call (e.g. a
+    slow Prometheus post-check query) must still clean up injected faults,
+    not just an interrupt during the settle sleep."""
+
+    class InterruptingMetricsClient:
+        def __init__(self, values):
+            self._values = list(values)
+
+        def query(self, promql: str) -> float:
+            if not self._values:
+                raise KeyboardInterrupt
+            return self._values.pop(0)
+
+    # Only the pre-check value is queued; the post-check query raises.
+    metrics = InterruptingMetricsClient([0.1])
+
+    with pytest.raises(KeyboardInterrupt):
+        run_experiment(_latency_experiment(), metrics, k8s, sleep=lambda s: None)
+
+    # Both pods got the qdisc add exec, then a matching cleanup exec each.
+    assert len(k8s.execs) == 4
+    add_pods = {name for _, name, cmd in k8s.execs[:2]}
+    cleanup_execs = k8s.execs[2:]
+    assert {name for _, name, _ in cleanup_execs} == add_pods
+    for _, _, command in cleanup_execs:
+        assert "tc qdisc del" in " ".join(command)
+
+
 def test_interrupt_mid_injection_removes_faults_from_earlier_actions(k8s):
     class InterruptingKubernetesClient(FakeKubernetesClient):
         def delete_pod(self, namespace, name):

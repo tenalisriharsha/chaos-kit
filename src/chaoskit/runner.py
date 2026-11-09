@@ -132,10 +132,10 @@ def run_experiment(
 
         result.injection_finished_at = clock()
         sleep(settle_seconds)
+        result.post_check = verify_steady_state(experiment.steady_state, metrics)
     except KeyboardInterrupt:
         _remove_active_faults(active_faults)
         raise
 
-    result.post_check = verify_steady_state(experiment.steady_state, metrics)
     result.finished_at = clock()
     return result
