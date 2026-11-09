@@ -159,7 +159,7 @@ Actions target pods via `target.namespace` and `target.label_selector`.
 `network_latency` needs `sh`, `tc` (iproute2), the `NET_ADMIN` capability
 and a node kernel with netem (`sch_netem`). If any of these is missing the
 run stops with an `ERROR` naming the pod and the command's output, and
-exits `2`. Both run detached in the pods and end on their own after
+exits `3`. Both run detached in the pods and end on their own after
 `duration`. Only pods that are `Running` and not terminating are
 targeted.
 
