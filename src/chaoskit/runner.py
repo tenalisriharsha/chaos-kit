@@ -15,7 +15,12 @@ from dataclasses import dataclass, field
 from chaoskit.experiment import Experiment
 from chaoskit.injectors import InjectionError, inject_action
 from chaoskit.injectors.kubernetes import KubernetesClient, KubernetesError
-from chaoskit.steadystate import MetricsClient, ProbeResult, verify_steady_state
+from chaoskit.steadystate import (
+    MetricsClient,
+    ProbeResult,
+    SteadyStateError,
+    verify_steady_state,
+)
 
 
 def _remove_active_faults(cleanups: list[Callable[[], None]]) -> None:
@@ -54,6 +59,7 @@ class RunResult:
     injection_finished_at: float | None = None
     finished_at: float | None = None
     injection_error: str | None = None
+    post_check_error: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -66,8 +72,10 @@ class RunResult:
 
     @property
     def partial_failure(self) -> bool:
-        """True when an action failed partway through injection."""
-        return self.injection_error is not None
+        """True when an action failed partway through injection, or the
+        post-injection steady-state check could not be completed after
+        chaos was already injected."""
+        return self.injection_error is not None or self.post_check_error is not None
 
     @property
     def duration_seconds(self) -> float | None:
@@ -99,6 +107,11 @@ def run_experiment(
     If an action cannot be injected, the run stops there: the returned
     result carries every injection completed before the failure plus
     ``injection_error``, instead of raising.
+
+    If the post-injection steady-state check itself fails (e.g. Prometheus
+    becomes unreachable right after chaos was injected), the returned result
+    carries every completed injection plus ``post_check_error``, and every
+    fault registered so far is removed immediately, instead of raising.
 
     If interrupted (``KeyboardInterrupt``), every fault injected so far is
     removed before the interrupt propagates, instead of leaving it to run
@@ -133,6 +146,11 @@ def run_experiment(
         result.injection_finished_at = clock()
         sleep(settle_seconds)
         result.post_check = verify_steady_state(experiment.steady_state, metrics)
+    except SteadyStateError as exc:
+        result.post_check_error = str(exc)
+        _remove_active_faults(active_faults)
+        result.finished_at = clock()
+        return result
     except KeyboardInterrupt:
         _remove_active_faults(active_faults)
         raise

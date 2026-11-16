@@ -170,7 +170,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(report.render_text(result))
 
     if result.partial_failure:
-        print(f"ERROR: {result.injection_error}", file=sys.stderr)
+        print(f"ERROR: {result.injection_error or result.post_check_error}", file=sys.stderr)
         return 3
     if result.passed:
         return 0

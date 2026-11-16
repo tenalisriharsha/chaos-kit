@@ -37,8 +37,13 @@ def _verdict(result: RunResult) -> str:
 def _verdict_line(result: RunResult) -> str:
     if result.aborted:
         return "experiment ABORTED (steady state violated before injection)"
-    if result.partial_failure:
+    if result.injection_error is not None:
         return f"experiment PARTIAL FAILURE (injection failed: {result.injection_error})"
+    if result.post_check_error is not None:
+        return (
+            "experiment PARTIAL FAILURE "
+            f"(post-injection check failed: {result.post_check_error})"
+        )
     if result.passed:
         return "experiment PASSED"
     return "experiment FAILED (steady state violated after injection)"
@@ -84,8 +89,10 @@ def render_text(result: RunResult) -> str:
         if not result.injections:
             lines.append("  (none)")
         lines.append("")
-        if result.partial_failure:
+        if result.injection_error is not None:
             lines.append(f"Injection failed: {result.injection_error}")
+        elif result.post_check_error is not None:
+            lines.append(f"Post-injection check failed: {result.post_check_error}")
         else:
             lines.append("Post-injection steady state:")
             lines.extend(_probe_line(r) for r in result.post_check or [])
@@ -124,6 +131,7 @@ def report_dict(result: RunResult) -> dict:
             for record in result.injections
         ],
         "injection_error": result.injection_error,
+        "post_check_error": result.post_check_error,
     }
 
 

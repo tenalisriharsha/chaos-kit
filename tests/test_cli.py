@@ -312,6 +312,27 @@ def test_run_kubernetes_unreachable(experiment_file, prometheus, monkeypatch, ca
     assert "Injected chaos" in out
 
 
+def test_run_post_check_prometheus_error_still_reports_completed_injection(
+    experiment_file, prometheus, fake_k8s, capsys
+):
+    """If Prometheus becomes unreachable on the post-injection check (after
+    chaos has already been injected into real pods), the operator must
+    still get a resilience report naming what was injected -- not a bare
+    ERROR line with no record that a pod was just killed."""
+    prometheus.respond_value(0.001)  # pre-check succeeds
+    prometheus.respond_connection_error()  # post-check: prometheus becomes unreachable
+
+    rc = main(
+        ["run", str(experiment_file), "--prometheus", prometheus.url, "--settle", "0"]
+    )
+
+    out, err = capsys.readouterr()
+    assert fake_k8s.deleted == [("default", "api-1")]
+    assert "Injected chaos" in out
+    assert "pod_kill" in out
+    assert rc != 0
+
+
 def test_check_non_json_prometheus_response(experiment_file, prometheus, capsys):
     prometheus.respond_raw(b"<html>login</html>")
     assert main(["check", str(experiment_file), "--prometheus", prometheus.url]) == 2
