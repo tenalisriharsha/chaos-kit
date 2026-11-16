@@ -139,12 +139,20 @@ Injection failed: no pods found matching 'app=api' in namespace 'default'
 Verdict: experiment PARTIAL FAILURE (injection failed: no pods found matching 'app=api' in namespace 'default')
 ```
 
+The same applies if the post-injection steady-state check itself fails
+after chaos was already injected (for example, Prometheus becomes
+unreachable): the report still lists what was injected, any
+`network_latency` qdisc is removed immediately instead of waiting out its
+duration, and the verdict reads `experiment PARTIAL FAILURE
+(post-injection check failed: ...)`.
+
 With `--json` the same report is emitted as machine-readable JSON
 (verdict, probe values, injections, and timings) for CI pipelines and
 dashboards. Exit codes: `0` passed, `1` failed or aborted, `2`
-setup/validation error, `3` an action failed partway through injection
-(the report above is still printed, before the `ERROR` line), `130` the
-run was interrupted (Ctrl-C).
+setup/validation error, `3` an action failed partway through injection, or
+the post-injection steady-state check itself failed after chaos was
+already injected (the report above is still printed, before the `ERROR`
+line), `130` the run was interrupted (Ctrl-C).
 
 ## Chaos actions
 
