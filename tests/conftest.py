@@ -7,12 +7,14 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+_CONNECTION_ERROR = object()
+
 
 class _StubPrometheus:
     """Serves canned /api/v1/query responses and records queries."""
 
     def __init__(self):
-        self._responses: list[dict | bytes] = []
+        self._responses: list[dict | bytes | object] = []
         self.queries: list[str] = []
         self.url = ""
 
@@ -22,6 +24,12 @@ class _StubPrometheus:
     def respond_raw(self, body: bytes) -> None:
         """Serve ``body`` verbatim instead of a JSON-encoded payload."""
         self._responses.append(body)
+
+    def respond_connection_error(self) -> None:
+        """Simulate Prometheus becoming unreachable mid-request: the
+        connection is closed before any response is written, the way a
+        crashed/restarting Prometheus looks to the client."""
+        self._responses.append(_CONNECTION_ERROR)
 
     def respond_value(self, value: float) -> None:
         self.respond(
@@ -47,6 +55,9 @@ def prometheus():
                 "status": "success",
                 "data": {"result": []},
             }
+            if payload is _CONNECTION_ERROR:
+                self.close_connection = True
+                return
             if isinstance(payload, bytes):
                 body = payload
             else:

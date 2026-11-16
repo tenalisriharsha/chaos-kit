@@ -4,6 +4,7 @@ import pytest
 
 from chaoskit.experiment import parse_experiment
 from chaoskit.runner import run_experiment
+from chaoskit.steadystate import SteadyStateError
 
 from fakes import FakeKubernetesClient
 
@@ -294,5 +295,54 @@ def test_interrupt_mid_injection_removes_faults_from_earlier_actions(k8s):
     # (pod_kill) is the one that raised.
     assert len(client.execs) == 4
     cleanup_execs = client.execs[2:]
+    for _, _, command in cleanup_execs:
+        assert "tc qdisc del" in " ".join(command)
+
+
+class RaisingPostCheckMetricsClient:
+    """Serves queued values, then raises on any call once exhausted.
+
+    Models Prometheus becoming unreachable right after chaos has already
+    been injected: the pre-check query succeeds, the post-check query fails.
+    """
+
+    def __init__(self, values: list[float]):
+        self._values = list(values)
+
+    def query(self, promql: str) -> float:
+        if not self._values:
+            raise SteadyStateError("prometheus query failed: boom")
+        return self._values.pop(0)
+
+
+def test_post_check_prometheus_error_is_recorded_not_raised(k8s):
+    """A SteadyStateError from the post-injection verify_steady_state call
+    must not crash run_experiment: the pod_kill that already happened in
+    the cluster needs to be reported, not lost."""
+    metrics = RaisingPostCheckMetricsClient([0.1])
+
+    result = run_experiment(_experiment(), metrics, k8s, sleep=lambda s: None)
+
+    assert not result.passed
+    assert result.injections, "the already-completed pod_kill must still be reported"
+    assert result.injections[0].action_type == "pod_kill"
+    assert k8s.deleted == [("default", "api-1")]
+    assert result.finished_at is not None
+
+
+def test_post_check_prometheus_error_removes_active_faults_immediately(k8s):
+    """A network_latency qdisc added before the post-check failure must be
+    removed right away, the same way a Ctrl-C removes it, instead of being
+    left to self-clean after the full fault duration."""
+    metrics = RaisingPostCheckMetricsClient([0.1])
+
+    result = run_experiment(_latency_experiment(), metrics, k8s, sleep=lambda s: None)
+
+    assert not result.passed
+    # Both pods got the qdisc add exec, then a matching cleanup exec each.
+    assert len(k8s.execs) == 4
+    add_pods = {name for _, name, cmd in k8s.execs[:2]}
+    cleanup_execs = k8s.execs[2:]
+    assert {name for _, name, _ in cleanup_execs} == add_pods
     for _, _, command in cleanup_execs:
         assert "tc qdisc del" in " ".join(command)
